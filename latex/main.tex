@@ -1,0 +1,158 @@
+\documentclass{article}
+
+\usepackage[dblblindworkshop, final]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+\workshoptitle{30562 --- Machine Learning and Artificial Intelligence}
+\title{Continuous-Depth Models vs. Discrete Networks: \\ An Empirical Study of Neural ODEs}
+
+\author{
+  Bassi Giuseppe \\
+  Bocconi University \\
+  \texttt{giuseppe.bassi2@studbocconi.it} \\
+  \And
+  Ben Nefla Kabir \\
+  Bocconi University \\
+  \texttt{kabir.bennefla@studbocconi.it} \\
+  \And
+  Grossi Gaia \\
+  Bocconi University \\
+  \texttt{gaia.grossi@studbocconi.it} \\
+  \AND
+  Notaro Anna \\
+  Bocconi University \\
+  \texttt{anna.notaro@studbocconi.it} \\
+  \And
+  Porta Beatrice \\
+  Bocconi University \\
+  \texttt{beatrice.porta@studbocconi.it} \\
+  \And
+  Vanni Leonardo \\
+Bocconi University \\
+  \texttt{leonardo.vanni@studbocconi.it} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Traditional deep neural networks, such as Residual Networks, rely on discrete sequences of hidden layers. In this project, we explore Neural Ordinary Differential Equations (Neural ODEs), a family of continuous-depth models that parameterise the derivative of the hidden state using a neural network. We empirically evaluate the trade-offs between standard ResNets and Neural ODEs across several dimensions: memory footprint, parameter efficiency, and computational cost (measured via Number of Function Evaluations). Furthermore, we explore the theoretical limitations of standard continuous vector fields, demonstrating topological bottlenecks on synthetically generated datasets, and evaluate the efficacy of Augmented Neural ODEs (ANODEs) in overcoming these constraints. Finally, we investigate the natural advantage of continuous-time models in processing irregularly sampled time-series data. 
+\end{abstract}
+
+\section{Introduction}
+
+The architecture of standard deep learning models, particularly Residual Networks (ResNets) \cite{he2016deep}, can be mathematically interpreted as an Euler discretization of a continuous transformation. By taking the limit as the step size approaches zero, the discrete sequence of hidden layers transforms into a continuous dynamical system \cite{chen2018neural}. 
+
+This formulation, known as Neural Ordinary Differential Equations (Neural ODEs), allows the model's output to be computed using black-box differential equation solvers. The continuous approach introduces several theoretical benefits: exact $O(1)$ memory cost during training via the adjoint sensitivity method, dynamic allocation of computation based on error tolerances, and the ability to natively handle irregular time-series data. However, these models also introduce unique challenges, such as the topological constraints of deterministic vector fields and the computational burden of complex solver dynamics \cite{dupont2019augmented}. 
+
+In this report, we conduct a comprehensive empirical ablation of Neural ODEs. We pose the following research questions: (1) Under what conditions do Neural ODEs provide a tangible parameter or memory advantage over standard discrete networks? (2) How do topological constraints limit standard ODE-Nets, and can state augmentation resolve them? (3) How does the internal computational complexity, measured by the Number of Function Evaluations (NFE), evolve over the course of training?
+
+\section{Background and Related Work}
+
+\paragraph{Residual Networks as Dynamical Systems}
+A residual block updates a hidden state $h_t$ via the transformation $h_{t+1} = h_t + f(h_t, \theta_t)$. If we view $t$ as a continuous time variable, this update is equivalent to a single Euler integration step solving the ODE $\frac{dh(t)}{dt} = f(h(t), t, \theta)$.
+
+\paragraph{Neural ODEs and the Adjoint Method}
+\citet{chen2018neural} formalized this relationship, proposing the use of adaptive ODE solvers to compute the forward pass. To enable backpropagation without storing the intermediate states of the solver, they utilized the adjoint sensitivity method, which computes gradients by solving a secondary augmented ODE backwards in time. 
+
+\paragraph{Topological Bottlenecks and Extensions}
+Because Neural ODEs model deterministic, continuous vector fields, their phase space trajectories cannot intersect. \citet{dupont2019augmented} demonstrated that this topological constraint prevents standard Neural ODEs from learning simple functions (e.g., mapping concentric circles). They introduced Augmented Neural ODEs (ANODEs), which append extra dimensions to the ODE state to allow trajectories to lift over one another. Additionally, \citet{rubanova2019latent} extended the ODE framework to Latent ODEs, demonstrating their superiority in modeling irregularly sampled time-series data.
+
+\section{Methodology}
+
+In this section, we detail the mathematical formulations of the models implemented in our study.
+
+\subsection{Standard Discrete ResNet}
+We define a baseline discrete ResNet consisting of $L$ blocks, where the forward propagation is defined iteratively. This serves as our primary benchmark for memory and accuracy.
+
+\subsection{Neural ODE (ODE-Net)}
+We parameterise the continuous dynamics of the hidden state $h(t)$ using a neural network $f_{\theta}$. For an input $x$, we set $h(0) = x$ and compute the output at a terminal time $T$ by evaluating the integral:
+\begin{equation}
+    h(T) = h(0) + \int_{0}^{T} f_{\theta}(h(t), t) \, dt
+\end{equation}
+This integration is handled via the \texttt{torchdiffeq} library, utilizing adaptive solvers such as Dopri5 (a Runge-Kutta method). 
+
+\subsection{Augmented Neural ODE (ANODE)}
+To break the topological constraints of the standard ODE-Net, we implement an Augmented ODE. The input space $\mathbb{R}^d$ is expanded to $\mathbb{R}^{d+p}$ by concatenating a $p$-dimensional vector of zeros:
+\begin{equation}
+    \frac{d}{dt} \begin{bmatrix} h(t) \\ a(t) \end{bmatrix} = f_{\theta} \left( \begin{bmatrix} h(t) \\ a(t) \end{bmatrix}, t \right), \quad \begin{bmatrix} h(0) \\ a(0) \end{bmatrix} = \begin{bmatrix} x \\ 0 \end{bmatrix}
+\end{equation}
+
+\section{Experiments}
+
+We design a suite of experiments to probe the specific inductive biases, memory efficiencies, and computational costs of continuous-depth models.
+
+\subsection{Experiment 1: Baseline Comparison on Image Classification}
+To assess parameter and memory efficiency, we evaluate a standard ResNet against an ODE-Net on the MNIST dataset. 
+\begin{itemize}
+    \item \textbf{Setup:} Both models are constrained to a similar parameter budget. We log training memory allocation and inference time.
+    \item \textbf{Results:} \textit{[TODO: Insert analysis comparing the $\mathcal{O}(1)$ memory footprint of the ODE-Net vs the ResNet, and discuss the trade-off in training speed.]}
+\end{itemize}
+
+\subsection{Experiment 2: Breaking Topological Bottlenecks}
+To visualize the limitations of vector fields, we train models on a synthetic 2D ``concentric circles'' dataset and a 1D cross-over mapping task.
+\begin{itemize}
+    \item \textbf{Setup:} We compare a standard ODE-Net mapping $\mathbb{R}^2 \to \mathbb{R}^2$ against an ANODE mapping $\mathbb{R}^2 \to \mathbb{R}^3$.
+    \item \textbf{Results:} \textit{[TODO: Insert phase portraits/quiver plots showing how the standard ODE struggles to separate the classes, while the ANODE lifts trajectories into the 3rd dimension to resolve the bottleneck.]}
+\end{itemize}
+
+\subsection{Experiment 3: Irregular Time-Series Modeling}
+We investigate the capacity of continuous models to handle non-uniform temporal data.
+\begin{itemize}
+    \item \textbf{Setup:} We generate synthetic periodic trajectories with 30-50\% randomly dropped observations and compare an ODE-RNN architecture against a standard discrete LSTM.
+    \item \textbf{Results:} \textit{[TODO: Discuss how the ODE naturally interpolates the missing data points between discrete updates.]}
+\end{itemize}
+
+\subsection{Experiment 4: Solver Dynamics and NFE Ablations}
+A known pathology of Neural ODEs is that as the model trains, the learned vector field becomes increasingly stiff, requiring the solver to take smaller steps.
+\begin{itemize}
+    \item \textbf{Setup:} We track the Number of Function Evaluations (NFE) across training epochs for different error tolerances and solver algorithms (Euler vs. RK4 vs. Dopri5).
+    \item \textbf{Results:} \textit{[TODO: Plot NFE over time. Discuss whether regularizing the vector field reduces NFE without sacrificing test accuracy.]}
+\end{itemize}
+
+\subsection{Results}
+
+TODO
+Present your main results using tables or figures.
+Compare against baselines where applicable.
+
+\subsection{Ablations}
+
+TODO
+If applicable, include ablation studies that isolate the contribution
+of individual design choices.
+
+\section{Conclusion}
+
+TODO
+Summarise what you did, what you found, and what the limitations are.
+Optionally, suggest directions for future work.
+
+\small
+\bibliographystyle{abbrvnat}
+\bibliography{references}
+
+\normalsize
+\newpage
+\appendix
+
+\section{Additional Results and Implementation Details}
+
+\subsection{Hyperparameters}
+\textit{[TODO: Include a table of learning rates, batch sizes, optimizer choices (e.g., Adam), and specific ODE solver tolerances.]}
+
+\subsection{Extended Visualizations}
+\textit{[TODO: Include additional phase space plots or vector field diagrams that were too large for the main text.]}
+
+\end{document}
