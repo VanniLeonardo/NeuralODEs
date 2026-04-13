@@ -5,23 +5,42 @@ import torch.nn as nn
 class ODEFunc(nn.Module):
     """Parameterizes the continuous dynamics of the hidden state.
     
-    Computes the vector field $f_\theta(h, t)$ for the Initial Value Problem.
+    Computes the time-dependent vector field $f_\\theta(h(t), t)$ for the IVP:
+    $ \\frac{dh(t)}{dt} = f_\\theta(h(t), t) $
     
     Args:
         in_features (int): Dimensionality of the hidden state $h(t)$.
+        hidden_dim (int): Dimensionality of the internal hidden layers.
     """
-    def __init__(self, in_features: int):
+    def __init__(self, in_features: int, hidden_dim: int):
         super().__init__()
         self.nfe = 0
-        self.net = nn.Linear(in_features, in_features) # Dummy network
+        
+        # The input dimension is in_features + 1 to concatenate the time scalar $t$ for ANODEs
+        self.net = nn.Sequential(
+            nn.Linear(in_features + 1, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, in_features)
+        )
 
     def forward(self, t: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
         """Evaluates the vector field at state $h$ and time $t$."""
-        raise NotImplementedError("Vector field forward pass not yet implemented.")
+        self.nfe += 1
+        
+        # $t$ is passed by the solver as a 0D scalar tensor.
+        # We expand it to match the batch dimension of $h$.
+        t_expanded = torch.ones_like(h[:, :1]) * t
+        
+        # Concatenate along the feature dimension
+        h_time = torch.cat([h, t_expanded], dim=1)
+        
+        return self.net(h_time)
 
 
 class ODEBlock(nn.Module):
-    """Integrates the ODEFunc over time $t \in [0, 1]$ via the adjoint method.
+    """Integrates the ODEFunc over time $t \\in[0, 1]$ via the adjoint method.
     
     Args:
         ode_func (nn.Module): The neural network parameterizing the vector field.

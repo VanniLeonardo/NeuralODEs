@@ -9,7 +9,7 @@ def test_shape_consistency() -> None:
     batch_size, dim = 32, 16
     x = torch.randn(batch_size, dim)
     
-    ode_func = ODEFunc(in_features=dim)
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
     ode_block = ODEBlock(ode_func=ode_func)
     
     try:
@@ -25,7 +25,7 @@ def test_nfe_tracking() -> None:
     dim = 16
     x = torch.randn(1, dim)
     
-    ode_func = ODEFunc(in_features=dim)
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
     ode_block = ODEBlock(ode_func=ode_func)
     
     assert ode_func.nfe == 0, "NFE should initialize to 0."
@@ -44,7 +44,7 @@ def test_gradient_flow() -> None:
     dim = 16
     x = torch.randn(4, dim, requires_grad=True)
     
-    ode_func = ODEFunc(in_features=dim)
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
     ode_block = ODEBlock(ode_func=ode_func)
     
     try:
@@ -68,7 +68,7 @@ def test_device_agnostic() -> None:
     dim = 16
     x = torch.randn(8, dim).to(device)
     
-    ode_func = ODEFunc(in_features=dim).to(device)
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
     ode_block = ODEBlock(ode_func=ode_func).to(device)
     
     try:
