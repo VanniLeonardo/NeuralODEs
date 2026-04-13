@@ -4,7 +4,7 @@ from torchdiffeq import odeint_adjoint as odeint
 
 
 class ODEFunc(nn.Module):
-    """Parameterizes the continuous dynamics of the hidden state.
+    r"""Parameterizes the continuous dynamics of the hidden state.
     
     Computes the time-dependent vector field $f_\\theta(h(t), t)$ for the IVP:
     $ \\frac{dh(t)}{dt} = f_\\theta(h(t), t) $
@@ -36,7 +36,7 @@ class ODEFunc(nn.Module):
 
 
 class ODEBlock(nn.Module):
-    """Integrates the ODEFunc over time $t \\in [0, 1]$ via the adjoint method.
+    r"""Integrates the ODEFunc over time $t \\in [0, 1]$ via the adjoint method.
     
     Utilizes the adjoint sensitivity method to allow backpropagation with $\mathcal{O}(1)$ 
     memory footprint.
