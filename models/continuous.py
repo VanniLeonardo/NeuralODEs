@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torchdiffeq import odeint_adjoint as odeint
 
 
 class ODEFunc(nn.Module):
@@ -16,7 +17,6 @@ class ODEFunc(nn.Module):
         super().__init__()
         self.nfe = 0
         
-        # The input dimension is in_features + 1 to concatenate the time scalar $t$ for ANODEs
         self.net = nn.Sequential(
             nn.Linear(in_features + 1, hidden_dim),
             nn.ReLU(),
@@ -29,27 +29,56 @@ class ODEFunc(nn.Module):
         """Evaluates the vector field at state $h$ and time $t$."""
         self.nfe += 1
         
-        # $t$ is passed by the solver as a 0D scalar tensor.
-        # We expand it to match the batch dimension of $h$.
         t_expanded = torch.ones_like(h[:, :1]) * t
-        
-        # Concatenate along the feature dimension
         h_time = torch.cat([h, t_expanded], dim=1)
         
         return self.net(h_time)
 
 
 class ODEBlock(nn.Module):
-    """Integrates the ODEFunc over time $t \\in[0, 1]$ via the adjoint method.
+    """Integrates the ODEFunc over time $t \\in [0, 1]$ via the adjoint method.
+    
+    Utilizes the adjoint sensitivity method to allow backpropagation with $\mathcal{O}(1)$ 
+    memory footprint.
     
     Args:
         ode_func (nn.Module): The neural network parameterizing the vector field.
+        solver_type (str): The ODE solver algorithm (e.g., 'dopri5', 'rk4', 'euler').
+        atol (float): Absolute error tolerance for adaptive solvers.
+        rtol (float): Relative error tolerance for adaptive solvers.
     """
-    def __init__(self, ode_func: nn.Module):
+    def __init__(
+        self, 
+        ode_func: nn.Module, 
+        solver_type: str = "dopri5", 
+        atol: float = 1e-3, 
+        rtol: float = 1e-3
+    ):
         super().__init__()
         self.ode_func = ode_func
-        self.integration_time = torch.tensor([0.0, 1.0]).float()
+        self.solver_type = solver_type
+        self.atol = atol
+        self.rtol = rtol
+        
+        # register_buffer ensures integration_time moves to the correct device
+        # automatically when model.to(device) is called.
+        self.register_buffer("integration_time", torch.tensor([0.0, 1.0]).float())
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Solves the IVP from $t=0$ to $t=1$."""
-        raise NotImplementedError("ODE integration not yet implemented.")
+        
+        # odeint expects the time tensor to be exactly the same dtype as input x
+        t = self.integration_time.type_as(x)
+        
+        out = odeint(
+            func=self.ode_func, 
+            y0=x, 
+            t=t, 
+            rtol=self.rtol, 
+            atol=self.atol, 
+            method=self.solver_type
+        )
+        
+        # out has shape (len(t), batch_size, dim)
+        # We only want the terminal state at t=1.0, which is index 1
+        return out[1]
