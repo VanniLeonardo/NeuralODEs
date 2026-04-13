@@ -1,0 +1,32 @@
+name: neural_odes
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  # Core Python
+  - python=3.11
+  
+  # ML Framework & CUDA
+  - pytorch
+  - torchvision
+  - pytorch-cuda=12.1
+  
+  # Data Science & Plotting
+  - numpy
+  - scikit-learn
+  - matplotlib
+  
+  # DevTools, Linting, & Formatting
+  - pytest
+  - black
+  - ruff
+  - mypy
+  - rich
+  
+  # Pip packages
+  - pip
+  - pip:
+    - torchdiffeq
+    - wandb
