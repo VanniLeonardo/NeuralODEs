@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local datasets (auto-downloaded)
+data/MNIST/
+
+# Temporary local test scripts
+test_mnist_loader.py
