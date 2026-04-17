@@ -211,3 +211,6 @@ data/MNIST/
 
 # Temporary local test scripts
 test_mnist_loader.py
+
+# WandB logs
+wandb/
