@@ -4,9 +4,7 @@ import wandb
 from models.networks import ODENet
 from training.engine import train_epoch
 from config import ODEConfig
-
-# NOTE: Member 1 will provide this import later
-# from data.synthetic import get_dataloaders 
+from data.synthetic import get_concentric_circles
 
 def main():
     # 1. Initialize Configuration
@@ -30,15 +28,13 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     criterion = nn.CrossEntropyLoss()
 
-    # --- MOCK DATA FOR NOW (Wait for Member 1) ---
-    # We use random data just to ensure the pipeline doesn't crash
-    x_dummy = torch.randn(1000, config.in_features)
-    y_dummy = torch.randint(0, 2, (1000,))
-    dataset = torch.utils.data.TensorDataset(x_dummy, y_dummy)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
-    # ---------------------------------------------
+    # 5. Load synthetic dataset
+    dataloader = get_concentric_circles(
+        batch_size=config.batch_size,
+        n_samples=1000
+    )
 
-    # 5. Training Loop
+    # 6. Training Loop
     for epoch in range(config.epochs):
         train_metrics = train_epoch(model, dataloader, optimizer, criterion, device)
         
