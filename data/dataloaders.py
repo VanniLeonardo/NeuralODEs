@@ -1,6 +1,9 @@
-import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+
+
+def flatten_tensor(x):
+    return x.view(-1)
 
 
 def get_mnist_dataloaders(batch_size: int, data_root: str = "./data"):
@@ -14,7 +17,7 @@ def get_mnist_dataloaders(batch_size: int, data_root: str = "./data"):
 
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Lambda(lambda x: x.view(-1))  # flatten
+        transforms.Lambda(flatten_tensor)
     ])
 
     train_dataset = datasets.MNIST(
@@ -35,14 +38,14 @@ def get_mnist_dataloaders(batch_size: int, data_root: str = "./data"):
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=2
+        num_workers=0
     )
 
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=2
+        num_workers=0
     )
 
     return train_loader, test_loader
