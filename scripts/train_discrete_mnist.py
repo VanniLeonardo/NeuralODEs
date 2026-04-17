@@ -42,6 +42,7 @@ def main():
     epochs = 10
 
     wandb.init(
+        mode="offline",
         project="neural-odes-30562",
         config={
             "model": "DiscreteResNet",
