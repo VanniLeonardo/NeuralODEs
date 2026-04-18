@@ -5,6 +5,7 @@ from models.networks import ODENet
 from training.engine import train_epoch
 from config import ODEConfig
 from data.synthetic import get_concentric_circles
+from training.utils import visualize_2d_features
 
 def main():
     # 1. Initialize Configuration
@@ -47,6 +48,9 @@ def main():
             "train_accuracy": train_metrics["accuracy"],
             "forward_nfe": train_metrics["nfe"]
         })
+        
+        if config.hidden_dim == 2 and epoch % 10 == 0:
+            visualize_2d_features(model, dataloader, device, epoch)
         
         if epoch % 5 == 0:
             print(f"Epoch {epoch} | Loss: {train_metrics['loss']:.4f} | NFE: {train_metrics['nfe']:.1f}")
