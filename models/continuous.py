@@ -60,14 +60,11 @@ class ODEBlock(nn.Module):
         self.atol = atol
         self.rtol = rtol
         
-        # register_buffer ensures integration_time moves to the correct device
-        # automatically when model.to(device) is called.
         self.register_buffer("integration_time", torch.tensor([0.0, 1.0]).float())
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Solves the IVP from $t=0$ to $t=1$."""
         
-        # odeint expects the time tensor to be exactly the same dtype as input x
         t = self.integration_time.type_as(x)
         
         out = odeint(
@@ -80,5 +77,4 @@ class ODEBlock(nn.Module):
         )
         
         # out has shape (len(t), batch_size, dim)
-        # We only want the terminal state at t=1.0, which is index 1
         return out[1]

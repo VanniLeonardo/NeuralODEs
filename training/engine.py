@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
-import wandb
 from typing import Dict
-
 
 def train_epoch(
     model: nn.Module, 
@@ -11,12 +9,15 @@ def train_epoch(
     criterion: nn.Module, 
     device: torch.device
 ) -> Dict[str, float]:
-    """Trains the model for a single epoch."""
     model.train()
     total_loss = 0.0
     total_nfe = 0
     correct = 0
     total_samples = 0
+    
+    # Reset memory stats at the start of the epoch
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
 
     for x, y in dataloader:
         x, y = x.to(device), y.to(device)
@@ -28,18 +29,27 @@ def train_epoch(
         optimizer.step()
 
         total_loss += loss.item() * x.size(0)
-        
-        # Calculate accuracy
         preds = torch.argmax(logits, dim=1)
         correct += (preds == y).sum().item()
         total_samples += x.size(0)
         
-        # Track NFE if the model is continuous
         if hasattr(model, 'ode_func'):
             total_nfe += model.ode_func.nfe
 
     avg_loss = total_loss / total_samples
     accuracy = correct / total_samples
-    avg_nfe = total_nfe / len(dataloader)  # Average NFE per batch
+    
+    # Calculate average NFE safely
+    avg_nfe = total_nfe / len(dataloader) if total_nfe > 0 else 0.0
+    
+    # Get peak memory in Megabytes
+    peak_memory_mb = 0.0
+    if device.type == "cuda":
+        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
 
-    return {"loss": avg_loss, "accuracy": accuracy, "nfe": avg_nfe}
+    return {
+        "loss": avg_loss, 
+        "accuracy": accuracy, 
+        "nfe": avg_nfe,
+        "memory_mb": peak_memory_mb
+    }

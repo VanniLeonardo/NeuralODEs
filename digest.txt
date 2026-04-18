@@ -1,0 +1,782 @@
+Directory structure:
+└── NeuralODEs/
+    ├── AI_CODE_GUIDELINES.md
+    ├── config.py
+    ├── environment.yml
+    ├── main.py
+    ├── data/
+    │   ├── dataloaders.py
+    │   └── synthetic.py
+    ├── models/
+    │   ├──  base.py
+    │   ├── __init__.py
+    │   ├── continuous.py
+    │   ├── discrete.py
+    │   └── networks.py
+    ├── scripts/
+    │   ├── run_discrete_mnist.slurm
+    │   ├── test_discrete_mnist.py
+    │   └── train_discrete_mnist.py
+    ├── tests/
+    │   ├── __init__.py
+    │   └── test_continuous.py
+    └── training/
+        ├── engine.py
+        └── utils.py
+
+================================================
+FILE: AI_CODE_GUIDELINES.md
+================================================
+# AI Developer Guidelines: Neural ODEs Project
+
+**To the AI Assistant:** You are acting as a Senior Machine Learning Engineer and Applied Mathematician. You are assisting a team of university Math and CS Majors in building a modular, academic PyTorch codebase for an empirical study on Neural Ordinary Differential Equations (Neural ODEs). 
+
+Whenever you generate, refactor, or review code for this project, you **must** strictly adhere to the following rules.
+
+## 1. Framework & Training Loop
+- **Use Raw PyTorch:** Do NOT use PyTorch Lightning, Ignite, or fastai. Training loops must be explicitly written using standard `for epoch in range(epochs):` and `for batch in dataloader:` structures.
+- **Device Agnostic:** Always write code that dynamically checks for hardware: `device = torch.device("cuda" if torch.cuda.is_available() else "cpu")`. Most of your code will be run on a GPU HPC Cluster.
+
+## 2. Code Style, Formatting, and Typing
+- **Strict Type Hinting:** Every function and method MUST have complete Python type hints for both arguments and return values (e.g., `def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:`). Use `typing` module imports (`List`, `Dict`, `Optional`, `Tuple`, `Any`).
+- **Naming Conventions:** 
+  - Functions and variables: `snake_case` (e.g., `compute_vector_field`, `hidden_state`).
+  - Classes: `PascalCase` (e.g., `AugmentedNeuralODE`, `ResNetBlock`).
+- **Formatting:** Assume the codebase uses **Black** for formatting (max line length 88) and **Ruff** for linting. Write clean, PEP 8 compliant code.
+
+## 3. Comments and Docstrings
+- **Google-Style Docstrings:** Use standard, concise Google-style docstrings for classes and functions. Do not over-explain.
+- **NO AI Fluff Comments:** Do NOT include obvious, redundant comments like `# Initialize the tensor` or `# Loop through the epochs`. 
+- **Mathematical Comments Only:** In-line comments should be strictly reserved for mathematical explanations, and **should include LaTeX formatting** when appropriate. 
+  - *Example:* `# Solves the IVP: $\frac{dh}{dt} = f(h, t)$ via adjoint method`
+- **External Explanations:** If the user asks you to explain how the code works (you should assume they want the explanation, unless specifically requested not to), explain it in the markdown text of your response, NOT as block comments inside the Python script.
+
+## 4. Logging & Visuals (WandB + Rich)
+- **Weights & Biases:** `wandb` is mandatory for all experimental tracking. Code that runs experiments must initialize `wandb.init()` and log metrics using `wandb.log()`.
+- **Console Output:** Use the `rich` library for pretty console logging (e.g., `from rich.console import Console; console = Console()`). Avoid standard ugly print statements during the main training loop.
+
+## 5. Configuration Management
+- Use a central `config.py` file leveraging Python `@dataclass` for default hyperparameter storage. 
+- Allow overrides via `argparse` in the main execution scripts. 
+- *Pattern:* Load the dataclass, parse `sys.argv` with `argparse`, overwrite dataclass fields if arguments are provided, and pass the resulting config to `wandb.init(config=...)`.
+
+## 6. Project Architecture
+Ensure any generated code fits into the following modular structure:
+```text
+project_root/
+â”œâ”€â”€ config.py           # Dataclasses containing hyperparameters
+â”œâ”€â”€ main.py             # Entry point (argparse -> wandb init -> train)
+â”œâ”€â”€ data/
+â”‚   â”œâ”€â”€ dataloaders.py  # MNIST and synthetic data logic
+â”‚   â””â”€â”€ synthetic.py    # Concentric circles, spiral generators
+â”œâ”€â”€ models/
+â”‚   â”œâ”€â”€ base.py         # Base nn.Module classes
+â”‚   â”œâ”€â”€ discrete.py     # Standard ResNet implementation
+â”‚   â””â”€â”€ continuous.py   # ODE-Net and ANODE implementations
+â”œâ”€â”€ training/
+â”‚   â”œâ”€â”€ engine.py       # Raw PyTorch train/val step functions
+â”‚   â””â”€â”€ utils.py        # Checkpointing, NFE tracking
+â””â”€â”€ notebooks/          # .ipynb files for EDA and final plotting
+
+In case of a modification to the project architecture or scope, update this file.
+
+
+================================================
+FILE: config.py
+================================================
+from dataclasses import dataclass
+from typing import Tuple
+
+
+@dataclass
+class ODEConfig:
+    """Central configuration for Neural ODE experiments."""
+    
+    # ODE Solver Parameters
+    solver_type: str = "dopri5"  # dopri5 is Runge-Kutta 4(5)
+    atol: float = 1e-3
+    rtol: float = 1e-3
+    integration_time: Tuple[float, float] = (0.0, 1.0)
+    
+    # Network Architecture
+    in_features: int = 2         # e.g., 2 for 2D synthetic datasets
+    hidden_dim: int = 32
+    
+    # Member 3 (ANODE) & Member 5 (Time-Series) overrides
+    augment_dim: int = 0         # Number of zero-dimensions to append
+    is_time_series: bool = False # Flag for ODE-RNN logic
+    
+    # Training Parameters
+    batch_size: int = 64
+    lr: float = 1e-3
+    epochs: int = 50
+
+
+================================================
+FILE: environment.yml
+================================================
+name: neural_odes
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  # Core Python
+  - python=3.11
+  
+  # ML Framework & CUDA
+  - pytorch
+  - torchvision
+  - pytorch-cuda=12.1
+  
+  # Data Science & Plotting
+  - numpy
+  - scikit-learn
+  - matplotlib
+  
+  # DevTools, Linting, & Formatting
+  - pytest
+  - black
+  - ruff
+  - mypy
+  - rich
+  
+  # Pip packages
+  - pip
+  - pip:
+    - torchdiffeq
+    - wandb
+
+
+================================================
+FILE: main.py
+================================================
+import torch
+import torch.nn as nn
+import wandb
+from models.networks import ODENet
+from training.engine import train_epoch
+from config import ODEConfig
+from data.synthetic import get_concentric_circles
+
+def main():
+    # 1. Initialize Configuration
+    config = ODEConfig()
+    
+    # 2. Initialize Weights & Biases
+    wandb.init(project="neural-odes-30562", config=config.__dict__)
+    
+    # 3. Hardware setup
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Running on device: {device}")
+
+    # 4. Initialize Model
+    model = ODENet(
+        data_dim=config.in_features,
+        hidden_dim=config.hidden_dim,
+        num_classes=2,
+        solver_type=config.solver_type
+    ).to(device)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+    criterion = nn.CrossEntropyLoss()
+
+    # 5. Load synthetic dataset
+    dataloader = get_concentric_circles(
+        batch_size=config.batch_size,
+        n_samples=1000
+    )
+
+    # 6. Training Loop
+    for epoch in range(config.epochs):
+        train_metrics = train_epoch(model, dataloader, optimizer, criterion, device)
+        
+        # Log to WandB
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": train_metrics["loss"],
+            "train_accuracy": train_metrics["accuracy"],
+            "forward_nfe": train_metrics["nfe"]
+        })
+        
+        if epoch % 5 == 0:
+            print(f"Epoch {epoch} | Loss: {train_metrics['loss']:.4f} | NFE: {train_metrics['nfe']:.1f}")
+
+    wandb.finish()
+
+if __name__ == "__main__":
+    main()
+
+
+================================================
+FILE: data/dataloaders.py
+================================================
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+
+
+def flatten_tensor(x):
+    return x.view(-1)
+
+
+def get_mnist_dataloaders(batch_size: int, data_root: str = "./data"):
+    """
+    Returns train and test dataloaders for MNIST.
+
+    IMPORTANT:
+    Images are flattened from [1, 28, 28] to [784]
+    because the model uses linear layers (MLP).
+    """
+
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Lambda(flatten_tensor)
+    ])
+
+    train_dataset = datasets.MNIST(
+        root=data_root,
+        train=True,
+        download=True,
+        transform=transform
+    )
+
+    test_dataset = datasets.MNIST(
+        root=data_root,
+        train=False,
+        download=True,
+        transform=transform
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0
+    )
+
+    return train_loader, test_loader
+
+
+================================================
+FILE: data/synthetic.py
+================================================
+import torch
+from torch.utils.data import TensorDataset, DataLoader
+from sklearn.datasets import make_circles
+
+
+def get_1d_crossing_data(batch_size: int):
+    x = torch.tensor([[-1.0], [1.0]], dtype=torch.float32)
+    y = torch.tensor([[1.0], [-1.0]], dtype=torch.float32)
+
+    dataset = TensorDataset(x, y)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    return loader
+
+
+def get_concentric_circles(batch_size: int, n_samples: int = 1024, noise: float = 0.05):
+    x, y = make_circles(n_samples=n_samples, noise=noise, factor=0.5)
+
+    x = torch.tensor(x, dtype=torch.float32)
+    y = torch.tensor(y, dtype=torch.long)
+
+    dataset = TensorDataset(x, y)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    return loader
+
+
+================================================
+FILE: models/ base.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: models/__init__.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: models/continuous.py
+================================================
+import torch
+import torch.nn as nn
+from torchdiffeq import odeint_adjoint as odeint
+
+
+class ODEFunc(nn.Module):
+    r"""Parameterizes the continuous dynamics of the hidden state.
+    
+    Computes the time-dependent vector field $f_\\theta(h(t), t)$ for the IVP:
+    $ \\frac{dh(t)}{dt} = f_\\theta(h(t), t) $
+    
+    Args:
+        in_features (int): Dimensionality of the hidden state $h(t)$.
+        hidden_dim (int): Dimensionality of the internal hidden layers.
+    """
+    def __init__(self, in_features: int, hidden_dim: int):
+        super().__init__()
+        self.nfe = 0
+        
+        self.net = nn.Sequential(
+            nn.Linear(in_features + 1, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, in_features)
+        )
+
+    def forward(self, t: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+        """Evaluates the vector field at state $h$ and time $t$."""
+        self.nfe += 1
+        
+        t_expanded = torch.ones_like(h[:, :1]) * t
+        h_time = torch.cat([h, t_expanded], dim=1)
+        
+        return self.net(h_time)
+
+
+class ODEBlock(nn.Module):
+    r"""Integrates the ODEFunc over time $t \\in [0, 1]$ via the adjoint method.
+    
+    Utilizes the adjoint sensitivity method to allow backpropagation with $\mathcal{O}(1)$ 
+    memory footprint.
+    
+    Args:
+        ode_func (nn.Module): The neural network parameterizing the vector field.
+        solver_type (str): The ODE solver algorithm (e.g., 'dopri5', 'rk4', 'euler').
+        atol (float): Absolute error tolerance for adaptive solvers.
+        rtol (float): Relative error tolerance for adaptive solvers.
+    """
+    def __init__(
+        self, 
+        ode_func: nn.Module, 
+        solver_type: str = "dopri5", 
+        atol: float = 1e-3, 
+        rtol: float = 1e-3
+    ):
+        super().__init__()
+        self.ode_func = ode_func
+        self.solver_type = solver_type
+        self.atol = atol
+        self.rtol = rtol
+        
+        self.register_buffer("integration_time", torch.tensor([0.0, 1.0]).float())
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Solves the IVP from $t=0$ to $t=1$."""
+        
+        t = self.integration_time.type_as(x)
+        
+        out = odeint(
+            func=self.ode_func, 
+            y0=x, 
+            t=t, 
+            rtol=self.rtol, 
+            atol=self.atol, 
+            method=self.solver_type
+        )
+        
+        # out has shape (len(t), batch_size, dim)
+        return out[1]
+
+
+================================================
+FILE: models/discrete.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: models/networks.py
+================================================
+import torch
+import torch.nn as nn
+from models.continuous import ODEFunc, ODEBlock
+
+
+class ODENet(nn.Module):
+    """Full continuous-depth model for classification tasks.
+    
+    Args:
+        data_dim (int): Dimensionality of the input data (e.g., 2 for circles).
+        hidden_dim (int): Dimensionality of the ODE hidden state.
+        num_classes (int): Number of output classes (e.g., 2 for binary classification).
+        solver_type (str): The ODE solver to use.
+    """
+    def __init__(self, data_dim: int, hidden_dim: int, num_classes: int, solver_type: str = "dopri5"):
+        super().__init__()
+        
+        # 1. Map input data into the hidden ODE space
+        self.downsampling = nn.Sequential(
+            nn.Linear(data_dim, hidden_dim),
+            nn.Tanh()
+        )
+        
+        # 2. The continuous continuous block
+        self.ode_func = ODEFunc(in_features=hidden_dim, hidden_dim=hidden_dim)
+        self.ode_block = ODEBlock(ode_func=self.ode_func, solver_type=solver_type)
+        
+        # 3. Map the terminal ODE state to class logits
+        self.fc = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Reset NFE for tracking
+        self.ode_func.nfe = 0
+        
+        h = self.downsampling(x)
+        h_T = self.ode_block(h)
+        return self.fc(h_T)
+
+
+class DiscreteResNet(nn.Module):
+    """Baseline discrete Residual Network for comparison.
+    
+    Uses standard Euler steps: $h_{t+1} = h_t + f(h_t, t)$
+    """
+    def __init__(self, data_dim: int, hidden_dim: int, num_classes: int, num_layers: int = 5):
+        super().__init__()
+        self.num_layers = num_layers
+        
+        self.downsampling = nn.Sequential(
+            nn.Linear(data_dim, hidden_dim),
+            nn.Tanh()
+        )
+        
+        # Using the exact same vector field architecture for fairness
+        self.layer_func = ODEFunc(in_features=hidden_dim, hidden_dim=hidden_dim)
+        
+        self.fc = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.downsampling(x)
+        
+        # Discrete integration (Euler method with step size dt = 1/num_layers)
+        dt = 1.0 / self.num_layers
+        for i in range(self.num_layers):
+            # Pass a dummy time tensor to match the ODEFunc signature
+            t_dummy = torch.tensor([i * dt], device=x.device, dtype=x.dtype)
+            h = h + dt * self.layer_func(t_dummy, h)
+            
+        return self.fc(h)
+
+
+================================================
+FILE: scripts/run_discrete_mnist.slurm
+================================================
+#!/bin/bash
+#SBATCH --job-name=disc_mnist
+#SBATCH --account=3263572
+#SBATCH --partition=stud
+#SBATCH --qos=stud
+#SBATCH --cpus-per-task=2
+#SBATCH --gpus=1
+#SBATCH --time=60
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+
+module load /software/modules/miniconda3
+eval "$(conda shell.bash hook)"
+conda activate neural_odes
+
+cd ~/NeuralODEs
+
+python -m scripts.train_discrete_mnist
+
+conda deactivate
+module unload /software/modules/miniconda3
+
+
+================================================
+FILE: scripts/test_discrete_mnist.py
+================================================
+import torch
+from data.dataloaders import get_mnist_dataloaders
+from models.networks import DiscreteResNet
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+train_loader, _ = get_mnist_dataloaders(batch_size=64)
+
+model = DiscreteResNet(
+    data_dim=784,
+    hidden_dim=128,
+    num_classes=10,
+    num_layers=5
+).to(device)
+
+x, y = next(iter(train_loader))
+x, y = x.to(device), y.to(device)
+
+logits = model(x)
+
+print("input shape:", x.shape)
+print("labels shape:", y.shape)
+print("output shape:", logits.shape)
+print("output dtype:", logits.dtype)
+
+
+================================================
+FILE: scripts/train_discrete_mnist.py
+================================================
+import torch
+import torch.nn as nn
+import wandb
+
+from data.dataloaders import get_mnist_dataloaders
+from models.networks import DiscreteResNet
+from training.engine import train_epoch
+
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+@torch.no_grad()
+def evaluate(model, dataloader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total_samples = 0
+
+    for x, y in dataloader:
+        x, y = x.to(device), y.to(device)
+
+        logits = model(x)
+        loss = criterion(logits, y)
+
+        total_loss += loss.item() * x.size(0)
+        preds = torch.argmax(logits, dim=1)
+        correct += (preds == y).sum().item()
+        total_samples += x.size(0)
+
+    avg_loss = total_loss / total_samples
+    accuracy = correct / total_samples
+    return {"loss": avg_loss, "accuracy": accuracy}
+
+
+def main():
+    batch_size = 64
+    hidden_dim = 128
+    num_layers = 5
+    lr = 1e-3
+    epochs = 10
+
+    wandb.init(
+        mode="offline",
+        project="neural-odes-30562",
+        config={
+            "model": "DiscreteResNet",
+            "dataset": "MNIST",
+            "batch_size": batch_size,
+            "hidden_dim": hidden_dim,
+            "num_layers": num_layers,
+            "lr": lr,
+            "epochs": epochs,
+        },
+    )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Running on device: {device}")
+
+    train_loader, test_loader = get_mnist_dataloaders(batch_size=batch_size)
+
+    model = DiscreteResNet(
+        data_dim=784,
+        hidden_dim=hidden_dim,
+        num_classes=10,
+        num_layers=num_layers,
+    ).to(device)
+
+    n_params = count_parameters(model)
+    print(f"Trainable parameters: {n_params}")
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.CrossEntropyLoss()
+
+    for epoch in range(epochs):
+        train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
+        test_metrics = evaluate(model, test_loader, criterion, device)
+
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": train_metrics["loss"],
+            "train_accuracy": train_metrics["accuracy"],
+            "test_loss": test_metrics["loss"],
+            "test_accuracy": test_metrics["accuracy"],
+            "num_parameters": n_params,
+        })
+
+        print(
+            f"Epoch {epoch} | "
+            f"train_loss: {train_metrics['loss']:.4f} | "
+            f"train_acc: {train_metrics['accuracy']:.4f} | "
+            f"test_loss: {test_metrics['loss']:.4f} | "
+            f"test_acc: {test_metrics['accuracy']:.4f}"
+        )
+
+    wandb.finish()
+
+
+if __name__ == "__main__":
+    main()
+
+
+================================================
+FILE: tests/__init__.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: tests/test_continuous.py
+================================================
+import pytest
+import torch
+import torch.nn as nn
+from models.continuous import ODEFunc, ODEBlock
+
+
+def test_shape_consistency() -> None:
+    """Ensures that the ODEBlock preserves the input dimensionality."""
+    batch_size, dim = 32, 16
+    x = torch.randn(batch_size, dim)
+    
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
+    ode_block = ODEBlock(ode_func=ode_func)
+    
+    try:
+        out = ode_block(x)
+    except NotImplementedError:
+        pytest.fail("ODEBlock forward pass is not implemented.")
+        
+    assert out.shape == x.shape, f"Expected {x.shape}, got {out.shape}"
+
+
+def test_nfe_tracking() -> None:
+    """Verifies that Number of Function Evaluations (NFE) strictly increases."""
+    dim = 16
+    x = torch.randn(1, dim)
+    
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
+    ode_block = ODEBlock(ode_func=ode_func)
+    
+    assert ode_func.nfe == 0, "NFE should initialize to 0."
+    
+    try:
+        _ = ode_block(x)
+    except NotImplementedError:
+        pytest.fail("ODEBlock forward pass is not implemented.")
+        
+    # Solving $\frac{dh}{dt}$ takes at least a few steps, so NFE > 1
+    assert ode_func.nfe > 1, f"NFE did not accumulate. NFE is {ode_func.nfe}."
+
+
+def test_gradient_flow() -> None:
+    """Tests the adjoint sensitivity method for valid gradient flow."""
+    dim = 16
+    x = torch.randn(4, dim, requires_grad=True)
+    
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
+    ode_block = ODEBlock(ode_func=ode_func)
+    
+    try:
+        out = ode_block(x)
+    except NotImplementedError:
+        pytest.fail("ODEBlock forward pass is not implemented.")
+        
+    loss = out.sum()
+    loss.backward()
+    
+    # Assert gradients flowed into the neural network weights
+    has_grads = any(p.grad is not None for p in ode_func.parameters())
+    assert has_grads, "Gradients did not flow to ODEFunc."
+    
+    # Assert gradients flowed all the way back to the input tensor
+    assert x.grad is not None, "Gradients did not flow back to the input tensor."
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available.")
+def test_device_agnostic() -> None:
+    """Ensures models and tensors stay on the requested GPU device."""
+    device = torch.device("cuda:0")
+    dim = 16
+    x = torch.randn(8, dim).to(device)
+    
+    ode_func = ODEFunc(in_features=dim, hidden_dim=32)
+    ode_block = ODEBlock(ode_func=ode_func).to(device)
+    
+    try:
+        out = ode_block(x)
+    except NotImplementedError:
+        pytest.fail("ODEBlock forward pass is not implemented.")
+        
+    assert out.device == device, "Output tensor fell back to CPU."
+
+
+================================================
+FILE: training/engine.py
+================================================
+import torch
+import torch.nn as nn
+import wandb
+from typing import Dict
+
+
+def train_epoch(
+    model: nn.Module, 
+    dataloader: torch.utils.data.DataLoader, 
+    optimizer: torch.optim.Optimizer, 
+    criterion: nn.Module, 
+    device: torch.device
+) -> Dict[str, float]:
+    """Trains the model for a single epoch."""
+    model.train()
+    total_loss = 0.0
+    total_nfe = 0
+    correct = 0
+    total_samples = 0
+
+    for x, y in dataloader:
+        x, y = x.to(device), y.to(device)
+
+        optimizer.zero_grad()
+        logits = model(x)
+        loss = criterion(logits, y)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item() * x.size(0)
+        
+        # Calculate accuracy
+        preds = torch.argmax(logits, dim=1)
+        correct += (preds == y).sum().item()
+        total_samples += x.size(0)
+        
+        # Track NFE if the model is continuous
+        if hasattr(model, 'ode_func'):
+            total_nfe += model.ode_func.nfe
+
+    avg_loss = total_loss / total_samples
+    accuracy = correct / total_samples
+    avg_nfe = total_nfe / len(dataloader)  # Average NFE per batch
+
+    return {"loss": avg_loss, "accuracy": accuracy, "nfe": avg_nfe}
+
+
+================================================
+FILE: training/utils.py
+================================================
+[Empty file]
+
