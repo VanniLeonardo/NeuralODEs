@@ -27,17 +27,11 @@ def evaluate(model, dataloader, criterion, device):
     return {"loss": total_loss / total_samples, "accuracy": correct / total_samples}
 
 def main():
-    # batch_size = 64
-    # hidden_dim = 128
-    # lr = 1e-3
-    # epochs = 10
-    # solver_type = "dopri5"
-    # Get parameters from wandb.config (allows sweep to override defaults)
-    batch_size = wandb.config.batch_size
+    batch_size = 64
     hidden_dim = 128
-    lr = wandb.config.lr
+    lr = 1e-3
     epochs = 10
-    solver_type = wandb.config.solver
+    solver_type = "dopri5"
 
     wandb.init(
         project="neural-odes-30562",
@@ -51,7 +45,12 @@ def main():
             "solver": solver_type
         },
     )
-
+    # Get parameters from wandb.config (allows sweep to override defaults)
+    batch_size = wandb.config.batch_size
+    hidden_dim = wandb.config.hidden_dim
+    lr = wandb.config.lr
+    epochs = wandb.config.epochs
+    solver_type = wandb.config.solver
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {device}")
