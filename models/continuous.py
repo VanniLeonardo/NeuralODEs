@@ -62,10 +62,14 @@ class ODEBlock(nn.Module):
         
         self.register_buffer("integration_time", torch.tensor([0.0, 1.0]).float())
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Solves the IVP from $t=0$ to $t=1$."""
+    def forward(self, x: torch.Tensor, return_trajectory: bool = False) -> torch.Tensor:
+        """Solves the IVP. If return_trajectory is True, returns intermediate states."""
         
-        t = self.integration_time.type_as(x)
+        if return_trajectory:
+            # Evaluate at 50 intermediate time steps between 0 and 1
+            t = torch.linspace(0.0, 1.0, steps=50).type_as(x)
+        else:
+            t = self.integration_time.type_as(x)
         
         out = odeint(
             func=self.ode_func, 
@@ -76,5 +80,7 @@ class ODEBlock(nn.Module):
             method=self.solver_type
         )
         
-        # out has shape (len(t), batch_size, dim)
-        return out[1]
+        if return_trajectory:
+            return out  # Shape: (50, batch_size, dim)
+            
+        return out[1]   # Shape: (batch_size, dim)

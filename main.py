@@ -5,7 +5,7 @@ from models.networks import ODENet
 from training.engine import train_epoch
 from config import ODEConfig
 from data.synthetic import get_concentric_circles
-from training.utils import visualize_2d_features
+from training.utils import visualize_2d_features, plot_ode_flows
 
 def main():
     # 1. Initialize Configuration
@@ -53,6 +53,7 @@ def main():
             visualize_2d_features(model, dataloader, device, epoch)
         
         if epoch % 5 == 0:
+            plot_ode_flows(model, dataloader, device, epoch)
             print(f"Epoch {epoch} | Loss: {train_metrics['loss']:.4f} | NFE: {train_metrics['nfe']:.1f}")
 
     wandb.finish()

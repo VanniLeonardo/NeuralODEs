@@ -28,12 +28,14 @@ class ODENet(nn.Module):
         # 3. Map the terminal ODE state to class logits
         self.fc = nn.Linear(hidden_dim, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Reset NFE for tracking
+    def forward(self, x: torch.Tensor, return_trajectory: bool = False) -> torch.Tensor:
         self.ode_func.nfe = 0
-        
         h = self.downsampling(x)
-        h_T = self.ode_block(h)
+        h_T = self.ode_block(h, return_trajectory=return_trajectory)
+        
+        if return_trajectory:
+            return h_T  # We don't pass the full trajectory to the classifier
+            
         return self.fc(h_T)
 
 

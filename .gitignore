@@ -214,3 +214,6 @@ test_mnist_loader.py
 
 # WandB logs
 wandb/
+
+digest.txt
+plots/
