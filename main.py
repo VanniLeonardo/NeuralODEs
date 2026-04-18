@@ -9,6 +9,8 @@ from data.synthetic import get_concentric_circles
 def main():
     # 1. Initialize Configuration
     config = ODEConfig()
+
+    config.hidden_dim = 2  # FORCE the ODE to stay in 2D to match the concentric circles dataset as in Chen et al. section 5.3
     
     # 2. Initialize Weights & Biases
     wandb.init(project="neural-odes-30562", config=config.__dict__)
