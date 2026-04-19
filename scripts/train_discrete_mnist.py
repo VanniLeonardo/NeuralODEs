@@ -84,15 +84,18 @@ def main():
             "test_loss": test_metrics["loss"],
             "test_accuracy": test_metrics["accuracy"],
             "num_parameters": n_params,
+            "memory_mb": train_metrics["memory_mb"],
         })
 
-        print(
-            f"Epoch {epoch} | "
-            f"train_loss: {train_metrics['loss']:.4f} | "
-            f"train_acc: {train_metrics['accuracy']:.4f} | "
-            f"test_loss: {test_metrics['loss']:.4f} | "
-            f"test_acc: {test_metrics['accuracy']:.4f}"
-        )
+        if epoch % 5 == 0:
+            print(
+                f"Epoch {epoch} | "
+                f"train_loss: {train_metrics['loss']:.4f} | "
+                f"train_acc: {train_metrics['accuracy']:.4f} | "
+                f"test_loss: {test_metrics['loss']:.4f} | "
+                f"test_acc: {test_metrics['accuracy']:.4f} | "
+                f"memory_mb: {train_metrics['memory_mb']:.1f}"
+            )
 
     wandb.finish()
 
