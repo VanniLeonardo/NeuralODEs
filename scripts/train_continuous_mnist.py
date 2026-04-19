@@ -32,11 +32,12 @@ def main():
     batch_size = 64
     hidden_dim = 64          # Keep this around 64 for Conv so params don't explode
     lr = 1e-3
-    epochs = 10
+    epochs = 30
     solver_type = "dopri5"
-    network_type = "cnn"     # Toggle this to "mlp" or "cnn"
+    network_type = "mlp"     # Toggle this to "mlp" or "cnn"
 
     wandb.init(
+        mode="offline",
         project="neural-odes-30562",
         config={
             "model": "ODENet",
