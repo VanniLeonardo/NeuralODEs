@@ -15,7 +15,7 @@ conda activate neural_odes
 
 cd ~/NeuralODEs
 
-python -m scripts.train_discrete_mnist --epochs 30
+python -m scripts.train_discrete_mnist
 
 conda deactivate
 module unload /software/modules/miniconda3
