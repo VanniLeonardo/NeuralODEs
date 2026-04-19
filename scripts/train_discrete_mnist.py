@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import wandb
+import argparse
 
 from data.dataloaders import get_mnist_dataloaders
 from models.networks import DiscreteResNet
@@ -34,12 +35,23 @@ def evaluate(model, dataloader, criterion, device):
     return {"loss": avg_loss, "accuracy": accuracy}
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--hidden_dim", type=int, default=128)
+    parser.add_argument("--num_layers", type=int, default=5)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=10)
+    return parser.parse_args()
+
+
 def main():
-    batch_size = 64
-    hidden_dim = 128
-    num_layers = 5
-    lr = 1e-3
-    epochs = 10
+    args = parse_args()
+    batch_size = args.batch_size
+    hidden_dim = args.hidden_dim
+    num_layers = args.num_layers
+    lr = args.lr
+    epochs = args.epochs
 
     wandb.init(
         mode="offline",
