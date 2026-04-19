@@ -3,8 +3,9 @@ import torch.nn as nn
 import wandb
 
 from data.dataloaders import get_mnist_dataloaders
-from models.networks import ODENet
+from models.networks import ODENet, ConvODENet
 from training.engine import train_epoch
+from scripts.plot_fig3 import evaluate_tolerances, plot_figure_3
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -27,16 +28,19 @@ def evaluate(model, dataloader, criterion, device):
     return {"loss": total_loss / total_samples, "accuracy": correct / total_samples}
 
 def main():
+    # --- DEFAULTS (Overridden by wandb sweep if running) ---
     batch_size = 64
-    hidden_dim = 128
+    hidden_dim = 64          # Keep this around 64 for Conv so params don't explode
     lr = 1e-3
     epochs = 10
     solver_type = "dopri5"
+    network_type = "cnn"     # Toggle this to "mlp" or "cnn"
 
     wandb.init(
         project="neural-odes-30562",
         config={
             "model": "ODENet",
+            "network_type": network_type,
             "dataset": "MNIST",
             "batch_size": batch_size,
             "hidden_dim": hidden_dim,
@@ -45,25 +49,27 @@ def main():
             "solver": solver_type
         },
     )
-    # Get parameters from wandb.config (allows sweep to override defaults)
+    
+    # Pull from config in case a Sweep is managing the run
     batch_size = wandb.config.batch_size
     hidden_dim = wandb.config.hidden_dim
     lr = wandb.config.lr
     epochs = wandb.config.epochs
     solver_type = wandb.config.solver
+    network_type = wandb.config.network_type
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running on device: {device}")
+    print(f"Running on device: {device} | Network: {network_type.upper()}")
 
-    train_loader, test_loader = get_mnist_dataloaders(batch_size=batch_size)
+    # Determine if we should flatten the image based on network type
+    flatten_img = (network_type == "mlp")
+    train_loader, test_loader = get_mnist_dataloaders(batch_size=batch_size, flatten=flatten_img)
 
-    # 100% matched to the ResNet parameters
-    model = ODENet(
-        data_dim=784,
-        hidden_dim=hidden_dim,
-        num_classes=10,
-        solver_type=solver_type
-    ).to(device)
+    # Initialize the correct architecture
+    if network_type == "mlp":
+        model = ODENet(data_dim=784, hidden_dim=hidden_dim, num_classes=10, solver_type=solver_type).to(device)
+    else:
+        model = ConvODENet(in_channels=1, num_filters=hidden_dim, num_classes=10, solver_type=solver_type).to(device)
 
     n_params = count_parameters(model)
     print(f"Trainable parameters: {n_params}")
@@ -89,9 +95,25 @@ def main():
         print(
             f"Epoch {epoch} | "
             f"train_acc: {train_metrics['accuracy']:.4f} | "
+            f"test_acc: {test_metrics['accuracy']:.4f} | "
             f"NFE: {train_metrics['nfe']:.1f} | "
             f"Mem: {train_metrics['memory_mb']:.1f} MB"
         )
+
+    # ==========================================================
+    # POST-TRAINING: GENERATE FIGURE 3 TOLERANCE PLOTS
+    # ==========================================================
+    print("Evaluating solver tolerances to generate Figure 3...")
+    # Grab a single batch from the test loader
+    x_val, y_val = next(iter(test_loader))
+    x_val, y_val = x_val.to(device), y_val.to(device)
+    
+    # Run the rigorous mathematical evaluation
+    results = evaluate_tolerances(model, x_val, y_val)
+    
+    # Plot and upload to WandB!
+    plot_figure_3(results, epoch=epochs)
+    print("Figure 3 generated and uploaded to WandB!")
 
     wandb.finish()
 

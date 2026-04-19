@@ -4,7 +4,9 @@ Directory structure:
     ├── config.py
     ├── environment.yml
     ├── main.py
+    ├── sweep_mnist.yaml
     ├── data/
+    │   ├── __init__.py
     │   ├── dataloaders.py
     │   └── synthetic.py
     ├── models/
@@ -14,8 +16,11 @@ Directory structure:
     │   ├── discrete.py
     │   └── networks.py
     ├── scripts/
+    │   ├── plot_fig3.py
     │   ├── run_discrete_mnist.slurm
+    │   ├── test_continuous_mnist.py
     │   ├── test_discrete_mnist.py
+    │   ├── train_continuous_mnist.py
     │   └── train_discrete_mnist.py
     ├── tests/
     │   ├── __init__.py
@@ -159,10 +164,13 @@ from models.networks import ODENet
 from training.engine import train_epoch
 from config import ODEConfig
 from data.synthetic import get_concentric_circles
+from training.utils import visualize_2d_features, plot_ode_flows
 
 def main():
     # 1. Initialize Configuration
     config = ODEConfig()
+
+    config.hidden_dim = 2  # FORCE the ODE to stay in 2D to match the concentric circles dataset as in Chen et al. section 5.3
     
     # 2. Initialize Weights & Biases
     wandb.init(project="neural-odes-30562", config=config.__dict__)
@@ -200,13 +208,60 @@ def main():
             "forward_nfe": train_metrics["nfe"]
         })
         
+        if config.hidden_dim == 2 and epoch % 10 == 0:
+            visualize_2d_features(model, dataloader, device, epoch)
+        
         if epoch % 5 == 0:
             print(f"Epoch {epoch} | Loss: {train_metrics['loss']:.4f} | NFE: {train_metrics['nfe']:.1f}")
+
+        if epoch % 20 == 0:
+            plot_ode_flows(model, dataloader, device, epoch)
 
     wandb.finish()
 
 if __name__ == "__main__":
     main()
+
+
+================================================
+FILE: sweep_mnist.yaml
+================================================
+program: scripts.train_continuous_mnist
+command:
+  - ${env}
+  - python
+  - "-m"
+  - ${program}
+method: bayes
+metric:
+  name: test_accuracy
+  goal: maximize
+parameters:
+  lr:
+    min: 0.0001
+    max: 0.01
+  hidden_dim:
+    values:
+      - 32
+      - 64
+      - 128
+      - 256
+  batch_size:
+    values:
+      - 64
+      - 128
+      - 256
+  solver:
+    values:
+      - "dopri5"
+      - "rk4"
+      - "euler"
+
+
+================================================
+FILE: data/__init__.py
+================================================
+[Empty file]
 
 
 ================================================
@@ -220,19 +275,20 @@ def flatten_tensor(x):
     return x.view(-1)
 
 
-def get_mnist_dataloaders(batch_size: int, data_root: str = "./data"):
+def get_mnist_dataloaders(batch_size: int, data_root: str = "./data", flatten: bool = True):
     """
     Returns train and test dataloaders for MNIST.
 
     IMPORTANT:
-    Images are flattened from [1, 28, 28] to [784]
+    Images are flattened from [1, 28, 28] to [784] if flatten=True
     because the model uses linear layers (MLP).
     """
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Lambda(flatten_tensor)
-    ])
+    transform_list = [transforms.ToTensor()]
+    if flatten:
+        transform_list.append(transforms.Lambda(flatten_tensor))
+    
+    transform = transforms.Compose(transform_list)
 
     train_dataset = datasets.MNIST(
         root=data_root,
@@ -374,10 +430,14 @@ class ODEBlock(nn.Module):
         
         self.register_buffer("integration_time", torch.tensor([0.0, 1.0]).float())
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Solves the IVP from $t=0$ to $t=1$."""
+    def forward(self, x: torch.Tensor, return_trajectory: bool = False) -> torch.Tensor:
+        """Solves the IVP. If return_trajectory is True, returns intermediate states."""
         
-        t = self.integration_time.type_as(x)
+        if return_trajectory:
+            # Evaluate at 50 intermediate time steps between 0 and 1
+            t = torch.linspace(0.0, 1.0, steps=50).type_as(x)
+        else:
+            t = self.integration_time.type_as(x)
         
         out = odeint(
             func=self.ode_func, 
@@ -388,8 +448,31 @@ class ODEBlock(nn.Module):
             method=self.solver_type
         )
         
-        # out has shape (len(t), batch_size, dim)
-        return out[1]
+        if return_trajectory:
+            return out  # Shape: (50, batch_size, dim)
+            
+        return out[1]   # Shape: (batch_size, dim)
+    
+class ConvODEFunc(nn.Module):
+    """Convolutional Vector Field for Image Data."""
+    def __init__(self, num_channels: int):
+        super().__init__()
+        self.nfe = 0
+        # Architecture strictly following the ANODE paper Appendix F.1.2
+        self.net = nn.Sequential(
+            nn.Conv2d(num_channels + 1, 64, kernel_size=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, num_channels, kernel_size=1, padding=0)
+        )
+
+    def forward(self, t: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+        self.nfe += 1
+        # t is a scalar. Expand it to match the (Batch, 1, H, W) shape of h
+        t_expanded = torch.ones(h.size(0), 1, h.size(2), h.size(3), device=h.device) * t
+        h_time = torch.cat([h, t_expanded], dim=1) # Concatenate on channel dimension
+        return self.net(h_time)
 
 
 ================================================
@@ -431,12 +514,14 @@ class ODENet(nn.Module):
         # 3. Map the terminal ODE state to class logits
         self.fc = nn.Linear(hidden_dim, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Reset NFE for tracking
+    def forward(self, x: torch.Tensor, return_trajectory: bool = False) -> torch.Tensor:
         self.ode_func.nfe = 0
-        
         h = self.downsampling(x)
-        h_T = self.ode_block(h)
+        h_T = self.ode_block(h, return_trajectory=return_trajectory)
+        
+        if return_trajectory:
+            return h_T  # We don't pass the full trajectory to the classifier
+            
         return self.fc(h_T)
 
 
@@ -473,6 +558,110 @@ class DiscreteResNet(nn.Module):
 
 
 ================================================
+FILE: scripts/plot_fig3.py
+================================================
+import torch
+import torch.nn as nn
+import time
+import matplotlib.pyplot as plt
+from models.networks import ODENet
+from data.dataloaders import get_mnist_dataloaders
+import wandb
+import os
+
+def evaluate_tolerances(model, x, y):
+    tolerances =[1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
+    
+    # 1. Compute "Ground Truth" mathematically perfect state
+    model.ode_block.atol = 1e-9
+    model.ode_block.rtol = 1e-9
+    with torch.no_grad():
+        perfect_h_T = model.ode_block(model.downsampling(x))
+
+    results =[]
+
+    # 2. Sweep over looser tolerances
+    for tol in tolerances:
+        model.ode_block.atol = tol
+        model.ode_block.rtol = tol
+        
+        # --- FORWARD PASS ---
+        model.ode_func.nfe = 0
+        start_time = time.time()
+        
+        h = model.downsampling(x)
+        h_T = model.ode_block(h)
+        logits = model.fc(h_T)
+        loss = nn.CrossEntropyLoss()(logits, y)
+        
+        forward_time = time.time() - start_time
+        nfe_forward = model.ode_func.nfe
+        
+        # Compute Numerical Error (MSE between perfect state and loose state)
+        num_error = torch.mean((perfect_h_T - h_T)**2).item()
+        
+        # --- BACKWARD PASS ---
+        model.ode_func.nfe = 0 # Reset to count backward steps!
+        loss.backward()
+        nfe_backward = model.ode_func.nfe
+        
+        results.append({
+            "tol": tol,
+            "nfe_forward": nfe_forward,
+            "nfe_backward": nfe_backward,
+            "time": forward_time,
+            "error": num_error
+        })
+        
+    return results
+
+def plot_figure_3(results, epoch):
+    """Plots the replications of Fig 3a, 3b, and 3c."""
+    nfes = [r["nfe_forward"] for r in results]
+    errors = [r["error"] for r in results]
+    times = [r["time"] for r in results]
+    nfes_bw = [r["nfe_backward"] for r in results]
+    
+    # Normalize times
+    max_time = max(times)
+    rel_times = [t / max_time for t in times]
+    colors = nfes # Map color to NFE like the paper
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    
+    # (a) NFE Forward vs Numerical Error
+    sc0 = axes[0].scatter(nfes, errors, c=colors, cmap='rainbow', s=100)
+    axes[0].set_yscale('log')
+    axes[0].set_xlabel('NFE Forward', fontsize=14)
+    axes[0].set_ylabel('Numerical Error', fontsize=14)
+    axes[0].set_xlim(0, max(nfes) + 20)
+    
+    # (b) NFE Forward vs Relative Time
+    axes[1].scatter(nfes, rel_times, c=colors, cmap='rainbow', s=100)
+    axes[1].set_xlabel('NFE Forward', fontsize=14)
+    axes[1].set_ylabel('Relative Time', fontsize=14)
+    axes[1].set_xlim(0, max(nfes) + 20)
+    axes[1].set_ylim(0, 1.1)
+
+    # (c) NFE Forward vs NFE Backward
+    axes[2].scatter(nfes, nfes_bw, c=colors, cmap='rainbow', s=100)
+    axes[2].plot([0, max(nfes)+20], [0, max(nfes)+20], 'k--', alpha=0.5) # x=y line
+    axes[2].set_xlabel('NFE Forward', fontsize=14)
+    axes[2].set_ylabel('NFE Backward', fontsize=14)
+    axes[2].set_xlim(0, max(nfes) + 20)
+    axes[2].set_ylim(0, max(nfes_bw) + 20)
+
+    plt.tight_layout()
+    os.makedirs("plots", exist_ok=True)
+    plt.savefig(f"plots/fig3_epoch_{epoch}.png")
+    
+    if wandb.run is not None:
+        wandb.log({"Figure_3": wandb.Image(f"plots/fig3_epoch_{epoch}.png")}, commit=False)
+        
+    plt.close()
+
+
+================================================
 FILE: scripts/run_discrete_mnist.slurm
 ================================================
 #!/bin/bash
@@ -496,6 +685,38 @@ python -m scripts.train_discrete_mnist
 
 conda deactivate
 module unload /software/modules/miniconda3
+
+
+================================================
+FILE: scripts/test_continuous_mnist.py
+================================================
+import torch
+from data.dataloaders import get_mnist_dataloaders
+from models.networks import ODENet
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Get data
+train_loader, _ = get_mnist_dataloaders(batch_size=64)
+
+# Initialize model
+model = ODENet(
+    data_dim=784,
+    hidden_dim=128,
+    num_classes=10,
+    solver_type="dopri5"
+).to(device)
+
+x, y = next(iter(train_loader))
+x, y = x.to(device), y.to(device)
+
+logits = model(x)
+
+print("input shape:", x.shape)
+print("labels shape:", y.shape)
+print("output shape:", logits.shape)
+print("output dtype:", logits.dtype)
+print("Forward NFE count:", model.ode_func.nfe)
 
 
 ================================================
@@ -525,6 +746,110 @@ print("input shape:", x.shape)
 print("labels shape:", y.shape)
 print("output shape:", logits.shape)
 print("output dtype:", logits.dtype)
+
+
+================================================
+FILE: scripts/train_continuous_mnist.py
+================================================
+import torch
+import torch.nn as nn
+import wandb
+
+from data.dataloaders import get_mnist_dataloaders
+from models.networks import ODENet
+from training.engine import train_epoch
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+@torch.no_grad()
+def evaluate(model, dataloader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total_samples = 0
+    for x, y in dataloader:
+        x, y = x.to(device), y.to(device)
+        logits = model(x)
+        loss = criterion(logits, y)
+        total_loss += loss.item() * x.size(0)
+        preds = torch.argmax(logits, dim=1)
+        correct += (preds == y).sum().item()
+        total_samples += x.size(0)
+
+    return {"loss": total_loss / total_samples, "accuracy": correct / total_samples}
+
+def main():
+    batch_size = 64
+    hidden_dim = 128
+    lr = 1e-3
+    epochs = 10
+    solver_type = "dopri5"
+
+    wandb.init(
+        project="neural-odes-30562",
+        config={
+            "model": "ODENet",
+            "dataset": "MNIST",
+            "batch_size": batch_size,
+            "hidden_dim": hidden_dim,
+            "lr": lr,
+            "epochs": epochs,
+            "solver": solver_type
+        },
+    )
+    # Get parameters from wandb.config (allows sweep to override defaults)
+    batch_size = wandb.config.batch_size
+    hidden_dim = wandb.config.hidden_dim
+    lr = wandb.config.lr
+    epochs = wandb.config.epochs
+    solver_type = wandb.config.solver
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Running on device: {device}")
+
+    train_loader, test_loader = get_mnist_dataloaders(batch_size=batch_size)
+
+    # 100% matched to the ResNet parameters
+    model = ODENet(
+        data_dim=784,
+        hidden_dim=hidden_dim,
+        num_classes=10,
+        solver_type=solver_type
+    ).to(device)
+
+    n_params = count_parameters(model)
+    print(f"Trainable parameters: {n_params}")
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.CrossEntropyLoss()
+
+    for epoch in range(epochs):
+        train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
+        test_metrics = evaluate(model, test_loader, criterion, device)
+
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": train_metrics["loss"],
+            "train_accuracy": train_metrics["accuracy"],
+            "test_loss": test_metrics["loss"],
+            "test_accuracy": test_metrics["accuracy"],
+            "num_parameters": n_params,
+            "forward_nfe": train_metrics["nfe"],
+            "peak_memory_mb": train_metrics["memory_mb"]
+        })
+
+        print(
+            f"Epoch {epoch} | "
+            f"train_acc: {train_metrics['accuracy']:.4f} | "
+            f"NFE: {train_metrics['nfe']:.1f} | "
+            f"Mem: {train_metrics['memory_mb']:.1f} MB"
+        )
+
+    wandb.finish()
+
+if __name__ == "__main__":
+    main()
 
 
 ================================================
@@ -730,9 +1055,7 @@ FILE: training/engine.py
 ================================================
 import torch
 import torch.nn as nn
-import wandb
 from typing import Dict
-
 
 def train_epoch(
     model: nn.Module, 
@@ -741,12 +1064,15 @@ def train_epoch(
     criterion: nn.Module, 
     device: torch.device
 ) -> Dict[str, float]:
-    """Trains the model for a single epoch."""
     model.train()
     total_loss = 0.0
     total_nfe = 0
     correct = 0
     total_samples = 0
+    
+    # Reset memory stats at the start of the epoch
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
 
     for x, y in dataloader:
         x, y = x.to(device), y.to(device)
@@ -758,25 +1084,116 @@ def train_epoch(
         optimizer.step()
 
         total_loss += loss.item() * x.size(0)
-        
-        # Calculate accuracy
         preds = torch.argmax(logits, dim=1)
         correct += (preds == y).sum().item()
         total_samples += x.size(0)
         
-        # Track NFE if the model is continuous
         if hasattr(model, 'ode_func'):
             total_nfe += model.ode_func.nfe
 
     avg_loss = total_loss / total_samples
     accuracy = correct / total_samples
-    avg_nfe = total_nfe / len(dataloader)  # Average NFE per batch
+    
+    # Calculate average NFE safely
+    avg_nfe = total_nfe / len(dataloader) if total_nfe > 0 else 0.0
+    
+    # Get peak memory in Megabytes
+    peak_memory_mb = 0.0
+    if device.type == "cuda":
+        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
 
-    return {"loss": avg_loss, "accuracy": accuracy, "nfe": avg_nfe}
+    return {
+        "loss": avg_loss, 
+        "accuracy": accuracy, 
+        "nfe": avg_nfe,
+        "memory_mb": peak_memory_mb
+    }
 
 
 ================================================
 FILE: training/utils.py
 ================================================
-[Empty file]
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
+import wandb
+import os
+from mpl_toolkits.mplot3d import Axes3D
+
+def visualize_2d_features(model: nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device, epoch: int):
+    """Passes 2D data through the ODE and plots the deformed feature space."""
+    model.eval()
+    all_features = []
+    all_labels =[]
+
+    with torch.no_grad():
+        for x, y in dataloader:
+            x = x.to(device)
+            # Pass data only up to the ODE block (skip the final fc layer)
+            h = model.downsampling(x)
+            h_T = model.ode_block(h)
+            
+            all_features.append(h_T.cpu())
+            all_labels.append(y.cpu())
+
+    features = torch.cat(all_features, dim=0).numpy()
+    labels = torch.cat(all_labels, dim=0).numpy()
+
+    # Create the plot
+    plt.figure(figsize=(6, 6))
+    plt.scatter(features[labels==0, 0], features[labels==0, 1], color='red', alpha=0.5, label='Class 0')
+    plt.scatter(features[labels==1, 0], features[labels==1, 1], color='blue', alpha=0.5, label='Class 1')
+    plt.title(f"ODE Feature Space at Epoch {epoch}")
+    plt.legend()
+    
+    # Save locally
+    os.makedirs("plots", exist_ok=True)
+    plot_path = f"plots/features_epoch_{epoch}.png"
+    plt.savefig(plot_path)
+    
+    # Upload to WandB
+    wandb.log({"feature_space": wandb.Image(plot_path)}, commit=False)
+    
+    plt.close()
+
+def plot_ode_flows(model: nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device, epoch: int, is_anode: bool = False):
+    """Plots the continuous ODE trajectories for a batch of data."""
+    model.eval()
+    x, y = next(iter(dataloader))
+    x = x.to(device)
+    
+    with torch.no_grad():
+        # trajectories shape: (time_steps, batch_size, hidden_dim)
+        trajectories = model(x, return_trajectory=True).cpu().numpy()
+        
+    y = y.numpy()
+    
+    fig = plt.figure(figsize=(8, 6))
+    
+    # If standard NODE (2D), plot 2D flows
+    if not is_anode:
+        ax = fig.add_subplot(111)
+        for i in range(len(x)):
+            color = 'blue' if y[i] == 1 else 'red'
+            # Plot the line across time for this specific sample
+            ax.plot(trajectories[:, i, 0], trajectories[:, i, 1], color=color, alpha=0.3, linewidth=1)
+            # Add an arrow at the end
+            ax.arrow(trajectories[-2, i, 0], trajectories[-2, i, 1], 
+                     trajectories[-1, i, 0] - trajectories[-2, i, 0], 
+                     trajectories[-1, i, 1] - trajectories[-2, i, 1], 
+                     color=color, head_width=0.05, alpha=0.8)
+    
+    # If ANODE (3D), plot 3D flows (per Beppe)
+    else:
+        ax = fig.add_subplot(111, projection='3d')
+        for i in range(len(x)):
+            color = 'blue' if y[i] == 1 else 'red'
+            ax.plot(trajectories[:, i, 0], trajectories[:, i, 1], trajectories[:, i, 2], color=color, alpha=0.3)
+            ax.scatter(trajectories[-1, i, 0], trajectories[-1, i, 1], trajectories[-1, i, 2], color=color, s=10)
+            
+    plt.title(f"ODE Flow Trajectories at Epoch {epoch}")
+    plot_path = f"plots/flow_epoch_{epoch}.png"
+    plt.savefig(plot_path)
+    wandb.log({"ode_flow": wandb.Image(plot_path)}, commit=False)
+    plt.close()
 

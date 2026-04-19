@@ -53,8 +53,10 @@ def main():
             visualize_2d_features(model, dataloader, device, epoch)
         
         if epoch % 5 == 0:
-            plot_ode_flows(model, dataloader, device, epoch)
             print(f"Epoch {epoch} | Loss: {train_metrics['loss']:.4f} | NFE: {train_metrics['nfe']:.1f}")
+
+        if epoch % 20 == 0:
+            plot_ode_flows(model, dataloader, device, epoch)
 
     wandb.finish()
 

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from models.continuous import ODEFunc, ODEBlock
+from models.continuous import ODEFunc, ODEBlock, ConvODEFunc
 
 
 class ODENet(nn.Module):
@@ -35,6 +35,39 @@ class ODENet(nn.Module):
         
         if return_trajectory:
             return h_T  # We don't pass the full trajectory to the classifier
+            
+        return self.fc(h_T)
+    
+class ConvODENet(nn.Module):
+    """Continuous-depth model for images using Convolutional layers."""
+    def __init__(self, in_channels: int, num_filters: int, num_classes: int, solver_type: str = "dopri5"):
+        super().__init__()
+        
+        # 1. Map input image (e.g. 1 channel) to feature maps without flattening
+        self.downsampling = nn.Sequential(
+            nn.Conv2d(in_channels, num_filters, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_filters),
+            nn.ReLU(inplace=True)
+        )
+        
+        # 2. The continuous block using the Convolutional Vector Field
+        self.ode_func = ConvODEFunc(num_channels=num_filters)
+        self.ode_block = ODEBlock(ode_func=self.ode_func, solver_type=solver_type)
+        
+        # 3. Global average pooling to flatten the spatial dimensions, then classify
+        self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(num_filters, num_classes)
+        )
+
+    def forward(self, x: torch.Tensor, return_trajectory: bool = False) -> torch.Tensor:
+        self.ode_func.nfe = 0
+        h = self.downsampling(x)
+        h_T = self.ode_block(h, return_trajectory=return_trajectory)
+        
+        if return_trajectory:
+            return h_T  
             
         return self.fc(h_T)
 

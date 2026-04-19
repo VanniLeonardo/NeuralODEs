@@ -84,3 +84,24 @@ class ODEBlock(nn.Module):
             return out  # Shape: (50, batch_size, dim)
             
         return out[1]   # Shape: (batch_size, dim)
+    
+class ConvODEFunc(nn.Module):
+    """Convolutional Vector Field for Image Data."""
+    def __init__(self, num_channels: int):
+        super().__init__()
+        self.nfe = 0
+        # Architecture strictly following the ANODE paper Appendix F.1.2
+        self.net = nn.Sequential(
+            nn.Conv2d(num_channels + 1, 64, kernel_size=1, padding=0),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, num_channels, kernel_size=1, padding=0)
+        )
+
+    def forward(self, t: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+        self.nfe += 1
+        # t is a scalar. Expand it to match the (Batch, 1, H, W) shape of h
+        t_expanded = torch.ones(h.size(0), 1, h.size(2), h.size(3), device=h.device) * t
+        h_time = torch.cat([h, t_expanded], dim=1) # Concatenate on channel dimension
+        return self.net(h_time)

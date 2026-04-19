@@ -6,19 +6,20 @@ def flatten_tensor(x):
     return x.view(-1)
 
 
-def get_mnist_dataloaders(batch_size: int, data_root: str = "./data"):
+def get_mnist_dataloaders(batch_size: int, data_root: str = "./data", flatten: bool = True):
     """
     Returns train and test dataloaders for MNIST.
 
     IMPORTANT:
-    Images are flattened from [1, 28, 28] to [784]
+    Images are flattened from [1, 28, 28] to [784] if flatten=True
     because the model uses linear layers (MLP).
     """
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Lambda(flatten_tensor)
-    ])
+    transform_list = [transforms.ToTensor()]
+    if flatten:
+        transform_list.append(transforms.Lambda(flatten_tensor))
+    
+    transform = transforms.Compose(transform_list)
 
     train_dataset = datasets.MNIST(
         root=data_root,
