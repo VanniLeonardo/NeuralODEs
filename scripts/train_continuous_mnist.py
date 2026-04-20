@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import wandb
+import argparse
 
 from data.dataloaders import get_mnist_dataloaders
 from models.networks import ODENet, ConvODENet
@@ -27,14 +28,28 @@ def evaluate(model, dataloader, criterion, device):
 
     return {"loss": total_loss / total_samples, "accuracy": correct / total_samples}
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--hidden_dim", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--solver", type=str, default="dopri5")
+    parser.add_argument("--network_type", type=str, default="mlp", choices=["mlp", "cnn"])
+    return parser.parse_args()
+
 def main():
-    # --- DEFAULTS (Overridden by wandb sweep if running) ---
-    batch_size = 64
-    hidden_dim = 64          # Keep this around 64 for Conv so params don't explode
-    lr = 1e-3
-    epochs = 30
-    solver_type = "dopri5"
-    network_type = "mlp"     # Toggle this to "mlp" or "cnn"
+    args = parse_args()
+    
+    batch_size = args.batch_size
+    hidden_dim = args.hidden_dim
+    lr = args.lr
+    epochs = args.epochs
+    solver_type = args.solver
+    network_type = args.network_type
+    # Select architecture based on network_type:
+    # - "mlp": fair comparison with DiscreteResNet (same input representation)
+    # - "cnn": image-based architecture, closer to the original Neural ODE paper setup
 
     wandb.init(
         mode="offline",
@@ -50,14 +65,14 @@ def main():
             "solver": solver_type
         },
     )
-    
-    # Pull from config in case a Sweep is managing the run
-    batch_size = wandb.config.batch_size
-    hidden_dim = wandb.config.hidden_dim
-    lr = wandb.config.lr
-    epochs = wandb.config.epochs
-    solver_type = wandb.config.solver
-    network_type = wandb.config.network_type
+    # Uncomment the following lines if running a WandB Sweep.
+    # In that case, hyperparameters are automatically provided by WandB instead of CLI arguments. 
+    # batch_size = wandb.config.batch_size
+    # hidden_dim = wandb.config.hidden_dim
+    # lr = wandb.config.lr
+    # epochs = wandb.config.epochs
+    # solver_type = wandb.config.solver
+    # network_type = wandb.config.network_type
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {device} | Network: {network_type.upper()}")

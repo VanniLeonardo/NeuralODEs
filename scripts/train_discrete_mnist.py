@@ -7,10 +7,8 @@ from data.dataloaders import get_mnist_dataloaders
 from models.networks import DiscreteResNet
 from training.engine import train_epoch
 
-
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
 
 @torch.no_grad()
 def evaluate(model, dataloader, criterion, device):
@@ -34,7 +32,6 @@ def evaluate(model, dataloader, criterion, device):
     accuracy = correct / total_samples
     return {"loss": avg_loss, "accuracy": accuracy}
 
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=64)
@@ -43,7 +40,6 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=30)
     return parser.parse_args()
-
 
 def main():
     args = parse_args()
@@ -110,7 +106,6 @@ def main():
             )
 
     wandb.finish()
-
 
 if __name__ == "__main__":
     main()

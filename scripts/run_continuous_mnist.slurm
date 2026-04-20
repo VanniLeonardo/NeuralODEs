@@ -15,7 +15,7 @@ conda activate neural_odes
 
 cd /home/3263572/NeuralODEs
 
-python -m scripts.train_continuous_mnist --epochs 30 --hidden_dim 124 --lr 1e-3
+python -m scripts.train_continuous_mnist
 
 conda deactivate
 module unload /software/modules/miniconda3
