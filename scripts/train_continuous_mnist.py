@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--solver", type=str, default="dopri5")
-    parser.add_argument("--network_type", type=str, default="mlp", choices=["mlp", "cnn"])
+    parser.add_argument("--network_type", type=str, default="cnn", choices=["mlp", "cnn"])
     return parser.parse_args()
 
 def main():
@@ -67,12 +67,12 @@ def main():
     )
     # Uncomment the following lines if running a WandB Sweep.
     # In that case, hyperparameters are automatically provided by WandB instead of CLI arguments. 
-    # batch_size = wandb.config.batch_size
-    # hidden_dim = wandb.config.hidden_dim
-    # lr = wandb.config.lr
-    # epochs = wandb.config.epochs
-    # solver_type = wandb.config.solver
-    # network_type = wandb.config.network_type
+    batch_size = wandb.config.batch_size
+    hidden_dim = wandb.config.hidden_dim
+    lr = wandb.config.lr
+    epochs = wandb.config.epochs
+    solver_type = wandb.config.solver
+    network_type = wandb.config.network_type
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {device} | Network: {network_type.upper()}")
