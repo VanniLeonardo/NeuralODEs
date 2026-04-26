@@ -5,26 +5,41 @@ from models.continuous import ODEFunc, ODEBlock, ConvODEFunc
 
 class ODENet(nn.Module):
     """Full continuous-depth model for classification tasks.
-    
+
     Args:
         data_dim (int): Dimensionality of the input data (e.g., 2 for circles).
         hidden_dim (int): Dimensionality of the ODE hidden state.
         num_classes (int): Number of output classes (e.g., 2 for binary classification).
         solver_type (str): The ODE solver to use.
+        atol (float): Absolute error tolerance forwarded to ODEBlock.
+        rtol (float): Relative error tolerance forwarded to ODEBlock.
     """
-    def __init__(self, data_dim: int, hidden_dim: int, num_classes: int, solver_type: str = "dopri5"):
+    def __init__(
+        self,
+        data_dim: int,
+        hidden_dim: int,
+        num_classes: int,
+        solver_type: str = "dopri5",
+        atol: float = 1e-3,
+        rtol: float = 1e-3,
+    ):
         super().__init__()
-        
+
         # 1. Map input data into the hidden ODE space
         self.downsampling = nn.Sequential(
             nn.Linear(data_dim, hidden_dim),
             nn.Tanh()
         )
-        
-        # 2. The continuous continuous block
+
+        # 2. The continuous dynamics block
         self.ode_func = ODEFunc(in_features=hidden_dim, hidden_dim=hidden_dim)
-        self.ode_block = ODEBlock(ode_func=self.ode_func, solver_type=solver_type)
-        
+        self.ode_block = ODEBlock(
+            ode_func=self.ode_func,
+            solver_type=solver_type,
+            atol=atol,
+            rtol=rtol,
+        )
+
         # 3. Map the terminal ODE state to class logits
         self.fc = nn.Linear(hidden_dim, num_classes)
 
