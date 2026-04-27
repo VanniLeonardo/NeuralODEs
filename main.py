@@ -18,6 +18,8 @@ def main() -> None:
 
     # 1. Initialize Configuration and parse overrides
     config = ODEConfig()
+    config.hidden_dim = 2  # Force hidden_dim to 2 for vizualization of failure modes
+    config.epochs = 100 
     parser = argparse.ArgumentParser(description="Neural ODE training")
     for field, value in config.__dict__.items():
         parser.add_argument(f"--{field}", type=type(value), default=value)
@@ -60,7 +62,6 @@ def main() -> None:
 
         wandb.log({"epoch": epoch, **train_metrics})
 
-        # Visualize only when hidden_dim == 2 so the feature space is plottable
         if config.hidden_dim == 2 and epoch % 10 == 0:
             visualize_2d_features(model, train_loader, device, epoch)
 
