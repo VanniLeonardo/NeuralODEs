@@ -97,7 +97,7 @@ def plot_ode_flows(
                 trajectories[-2, i, 0], trajectories[-2, i, 1],
                 trajectories[-1, i, 0] - trajectories[-2, i, 0],
                 trajectories[-1, i, 1] - trajectories[-2, i, 1],
-                color=color, head_width=0.05, alpha=0.8,
+                color=color, head_width=0.01, head_length=0.015, alpha=0.8,
             )
     else:
         ax = fig.add_subplot(111, projection="3d")
