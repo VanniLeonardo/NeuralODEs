@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from data.timeseries import IrregularSineWaveDataset
-from models.ode_rnn import GRUTimeSeriesBaseline, ODERNN
+from kaby.data.timeseries import IrregularSineWaveDataset
+from kaby.models.ode_rnn import GRUTimeSeriesBaseline, ODERNN
 
 
 def _build_batch(batch_size: int = 3) -> dict[str, torch.Tensor]:

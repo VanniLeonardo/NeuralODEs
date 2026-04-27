@@ -9,10 +9,10 @@ import numpy as np
 import torch
 import wandb
 
-from config import ODEConfig
-from data.timeseries import get_irregular_sine_dataloaders
-from models.ode_rnn import GRUTimeSeriesBaseline, ODERNN
-from training.timeseries_engine import evaluate_timeseries, train_timeseries_epoch
+from kaby.config import ODEConfig
+from kaby.data.timeseries import get_irregular_sine_dataloaders
+from kaby.models.ode_rnn import GRUTimeSeriesBaseline, ODERNN
+from kaby.training.timeseries_engine import evaluate_timeseries, train_timeseries_epoch
 
 try:
     from rich.console import Console
