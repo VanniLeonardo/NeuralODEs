@@ -33,12 +33,21 @@ def test_irregular_sine_dataset_masks_are_consistent() -> None:
     )
     sample = dataset[0]
 
+    assert sample["context_mask"].shape == (8, 1)
+    assert sample["interp_mask"].shape == (8, 1)
+    assert sample["future_mask"].shape == (5, 1)
+
     assert sample["context_mask"].sum().item() >= 2
-    assert torch.all(sample["query_times"][1:] > sample["query_times"][:-1])
-    assert torch.allclose(sample["query_times"][:8], sample["context_times"])
-    assert not sample["future_mask"][:8].any()
-    assert sample["future_mask"][8:].all()
-    assert sample["interpolation_mask"][:8].any()
+    assert sample["interp_mask"].sum().item() >= 1
+
+    assert torch.all(sample["context_times"][1:] > sample["context_times"][:-1])
+    assert torch.all(sample["full_times"][1:] > sample["full_times"][:-1])
+    assert torch.allclose(sample["full_times"][:8], sample["context_times"])
+
+    assert sample["future_mask"].all()
+    assert sample["observed_context"].shape == (8, 1)
+    assert sample["context_values"].shape == (8, 1)
+    assert sample["ground_truth"].shape == (13, 1)
 
 
 def test_ode_rnn_shape_consistency() -> None:
@@ -52,12 +61,12 @@ def test_ode_rnn_shape_consistency() -> None:
 
     predictions = model(
         context_times=batch["context_times"],
-        context_observations=batch["context_observations"],
+        observed_context=batch["observed_context"],
         context_mask=batch["context_mask"],
-        query_times=batch["query_times"],
+        full_times=batch["full_times"],
     )
 
-    assert predictions.shape == batch["query_targets"].shape
+    assert predictions.shape == batch["ground_truth"].shape
 
 
 def test_gru_baseline_shape_consistency() -> None:
@@ -70,12 +79,12 @@ def test_gru_baseline_shape_consistency() -> None:
 
     predictions = model(
         context_times=batch["context_times"],
-        context_observations=batch["context_observations"],
+        observed_context=batch["observed_context"],
         context_mask=batch["context_mask"],
-        query_times=batch["query_times"],
+        full_times=batch["full_times"],
     )
 
-    assert predictions.shape == batch["query_targets"].shape
+    assert predictions.shape == batch["ground_truth"].shape
 
 
 def test_ode_rnn_nfe_tracking() -> None:
@@ -91,9 +100,9 @@ def test_ode_rnn_nfe_tracking() -> None:
 
     _ = model(
         context_times=batch["context_times"],
-        context_observations=batch["context_observations"],
+        observed_context=batch["observed_context"],
         context_mask=batch["context_mask"],
-        query_times=batch["query_times"],
+        full_times=batch["full_times"],
     )
 
     assert model.get_nfe() > 0
@@ -110,9 +119,9 @@ def test_ode_rnn_gradient_flow() -> None:
 
     predictions = model(
         context_times=batch["context_times"],
-        context_observations=batch["context_observations"],
+        observed_context=batch["observed_context"],
         context_mask=batch["context_mask"],
-        query_times=batch["query_times"],
+        full_times=batch["full_times"],
     )
     loss = predictions.sum()
     loss.backward()
@@ -137,9 +146,9 @@ def test_ode_rnn_device_agnostic() -> None:
 
     predictions = model(
         context_times=batch["context_times"],
-        context_observations=batch["context_observations"],
+        observed_context=batch["observed_context"],
         context_mask=batch["context_mask"],
-        query_times=batch["query_times"],
+        full_times=batch["full_times"],
     )
 
     assert predictions.device == device

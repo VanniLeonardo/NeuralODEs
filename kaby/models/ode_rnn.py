@@ -12,8 +12,8 @@ from models.continuous import ODEFunc
 class ODERNN(nn.Module):
     """Standalone ODE-RNN for irregularly sampled time series.
 
-    The hidden state evolves continuously between observations via an ODE
-    solve and is updated at observed context points with a GRUCell.
+    The hidden state evolves continuously between observations via an ODE solve
+    and is updated at observed context points with a GRUCell.
     """
 
     def __init__(
@@ -60,47 +60,56 @@ class ODERNN(nn.Module):
         """Returns forward-pass NFE from the most recent call."""
         return self.last_nfe
 
+    def _normalize_context_mask(self, context_mask: torch.Tensor) -> torch.Tensor:
+        """Normalizes context_mask to shape [batch, T_ctx]."""
+        if context_mask.ndim == 2:
+            return context_mask
+        if context_mask.ndim == 3 and context_mask.size(-1) == 1:
+            return context_mask.squeeze(-1)
+        raise ValueError(
+            "context_mask must have shape [batch, T_ctx] or [batch, T_ctx, 1]."
+        )
+
     def _validate_inputs(
         self,
         context_times: torch.Tensor,
-        context_observations: torch.Tensor,
+        observed_context: torch.Tensor,
         context_mask: torch.Tensor,
-        query_times: torch.Tensor,
+        full_times: torch.Tensor,
     ) -> None:
         if context_times.ndim != 2:
             raise ValueError(
                 "context_times must have shape [batch, num_context_points]."
             )
-        if context_observations.ndim != 3:
+        if observed_context.ndim != 3:
             raise ValueError(
-                "context_observations must have shape "
+                "observed_context must have shape "
                 "[batch, num_context_points, input_dim]."
             )
-        if context_mask.ndim != 2:
+        if full_times.ndim != 2:
             raise ValueError(
-                "context_mask must have shape [batch, num_context_points]."
-            )
-        if query_times.ndim != 2:
-            raise ValueError(
-                "query_times must have shape [batch, num_query_points]."
+                "full_times must have shape [batch, num_query_points]."
             )
 
-        if context_times.shape[:2] != context_observations.shape[:2]:
+        context_mask = self._normalize_context_mask(context_mask)
+
+        if context_times.shape[:2] != observed_context.shape[:2]:
             raise ValueError(
-                "context_times and context_observations must agree on batch "
+                "context_times and observed_context must agree on batch "
                 "and sequence dimensions."
             )
         if context_times.shape != context_mask.shape:
             raise ValueError(
-                "context_times and context_mask must have identical shapes."
+                "context_times and context_mask must have identical shapes "
+                "after mask normalization."
             )
-        if query_times.size(1) < context_times.size(1):
+        if full_times.size(1) < context_times.size(1):
             raise ValueError(
-                "query_times must include all context_times as a prefix."
+                "full_times must include all context_times as a prefix."
             )
-        if context_observations.size(-1) != self.input_dim:
+        if observed_context.size(-1) != self.input_dim:
             raise ValueError(
-                "context_observations last dimension does not match input_dim."
+                "observed_context last dimension does not match input_dim."
             )
 
     def _solve_hidden(
@@ -131,31 +140,31 @@ class ODERNN(nn.Module):
     def _forward_single(
         self,
         context_times: torch.Tensor,
-        context_observations: torch.Tensor,
+        observed_context: torch.Tensor,
         context_mask: torch.Tensor,
-        query_times: torch.Tensor,
+        full_times: torch.Tensor,
     ) -> torch.Tensor:
         """Runs ODE-RNN inference for a single sample."""
         if not torch.all(context_times[1:] > context_times[:-1]):
             raise ValueError(
                 "context_times must be strictly increasing for every sample."
             )
-        if not torch.all(query_times[1:] > query_times[:-1]):
+        if not torch.all(full_times[1:] > full_times[:-1]):
             raise ValueError(
-                "query_times must be strictly increasing for every sample."
+                "full_times must be strictly increasing for every sample."
             )
 
         num_context_points = context_times.size(0)
-        if not torch.allclose(query_times[:num_context_points], context_times):
+        if not torch.allclose(full_times[:num_context_points], context_times):
             raise ValueError(
-                "query_times must start with the provided context_times."
+                "full_times must start with the provided context_times."
             )
 
         hidden = torch.zeros(
             1,
             self.hidden_dim,
             device=context_times.device,
-            dtype=context_observations.dtype,
+            dtype=observed_context.dtype,
         )
         previous_time = context_times.new_tensor(self.start_time)
         predictions: List[torch.Tensor] = []
@@ -165,13 +174,13 @@ class ODERNN(nn.Module):
             hidden = self._solve_hidden(hidden, previous_time, current_time)
 
             if bool(context_mask[step].item()):
-                observation = context_observations[step].unsqueeze(0)
+                observation = observed_context[step].unsqueeze(0)
                 hidden = self.update_cell(observation, hidden)
 
             predictions.append(self.readout(hidden))
             previous_time = current_time
 
-        for current_time in query_times[num_context_points:]:
+        for current_time in full_times[num_context_points:]:
             hidden = self._solve_hidden(hidden, previous_time, current_time)
             predictions.append(self.readout(hidden))
             previous_time = current_time
@@ -181,28 +190,30 @@ class ODERNN(nn.Module):
     def forward(
         self,
         context_times: torch.Tensor,
-        context_observations: torch.Tensor,
+        observed_context: torch.Tensor,
         context_mask: torch.Tensor,
-        query_times: torch.Tensor,
+        full_times: torch.Tensor,
     ) -> torch.Tensor:
-        """Predicts values at query_times after conditioning on context.
+        """Predicts values at full_times after conditioning on observed context.
 
         Args:
             context_times: Tensor of shape [batch, T_ctx].
-            context_observations: Tensor of shape [batch, T_ctx, input_dim].
-                Masked context positions should already be zero-filled.
-            context_mask: Tensor of shape [batch, T_ctx].
-            query_times: Tensor of shape [batch, T_query], with the first
+            observed_context: Tensor of shape [batch, T_ctx, input_dim].
+                Missing context positions should already be zero-filled.
+            context_mask: Tensor of shape [batch, T_ctx] or [batch, T_ctx, 1].
+            full_times: Tensor of shape [batch, T_full], with the first
                 T_ctx entries equal to context_times.
 
         Returns:
-            Tensor of shape [batch, T_query, output_dim].
+            Tensor of shape [batch, T_full, output_dim].
         """
+        context_mask = self._normalize_context_mask(context_mask)
+
         self._validate_inputs(
             context_times=context_times,
-            context_observations=context_observations,
+            observed_context=observed_context,
             context_mask=context_mask,
-            query_times=query_times,
+            full_times=full_times,
         )
         self.reset_nfe()
 
@@ -210,9 +221,9 @@ class ODERNN(nn.Module):
         for batch_index in range(context_times.size(0)):
             sample_predictions = self._forward_single(
                 context_times=context_times[batch_index],
-                context_observations=context_observations[batch_index],
+                observed_context=observed_context[batch_index],
                 context_mask=context_mask[batch_index],
-                query_times=query_times[batch_index],
+                full_times=full_times[batch_index],
             )
             batch_predictions.append(sample_predictions.unsqueeze(0))
 
@@ -250,43 +261,52 @@ class GRUTimeSeriesBaseline(nn.Module):
         """Returns zero because the GRU baseline performs no ODE solves."""
         return 0
 
+    def _normalize_context_mask(self, context_mask: torch.Tensor) -> torch.Tensor:
+        """Normalizes context_mask to shape [batch, T_ctx]."""
+        if context_mask.ndim == 2:
+            return context_mask
+        if context_mask.ndim == 3 and context_mask.size(-1) == 1:
+            return context_mask.squeeze(-1)
+        raise ValueError(
+            "context_mask must have shape [batch, T_ctx] or [batch, T_ctx, 1]."
+        )
+
     def _validate_inputs(
         self,
         context_times: torch.Tensor,
-        context_observations: torch.Tensor,
+        observed_context: torch.Tensor,
         context_mask: torch.Tensor,
-        query_times: torch.Tensor,
+        full_times: torch.Tensor,
     ) -> None:
         if context_times.ndim != 2:
             raise ValueError(
                 "context_times must have shape [batch, num_context_points]."
             )
-        if context_observations.ndim != 3:
+        if observed_context.ndim != 3:
             raise ValueError(
-                "context_observations must have shape "
+                "observed_context must have shape "
                 "[batch, num_context_points, input_dim]."
             )
-        if context_mask.ndim != 2:
+        if full_times.ndim != 2:
             raise ValueError(
-                "context_mask must have shape [batch, num_context_points]."
-            )
-        if query_times.ndim != 2:
-            raise ValueError(
-                "query_times must have shape [batch, num_query_points]."
+                "full_times must have shape [batch, num_query_points]."
             )
 
-        if context_times.shape[:2] != context_observations.shape[:2]:
+        context_mask = self._normalize_context_mask(context_mask)
+
+        if context_times.shape[:2] != observed_context.shape[:2]:
             raise ValueError(
-                "context_times and context_observations must agree on batch "
+                "context_times and observed_context must agree on batch "
                 "and sequence dimensions."
             )
         if context_times.shape != context_mask.shape:
             raise ValueError(
-                "context_times and context_mask must have identical shapes."
+                "context_times and context_mask must have identical shapes "
+                "after mask normalization."
             )
-        if context_observations.size(-1) != self.input_dim:
+        if observed_context.size(-1) != self.input_dim:
             raise ValueError(
-                "context_observations last dimension does not match input_dim."
+                "observed_context last dimension does not match input_dim."
             )
 
     def _build_step_input(
@@ -303,31 +323,31 @@ class GRUTimeSeriesBaseline(nn.Module):
     def _forward_single(
         self,
         context_times: torch.Tensor,
-        context_observations: torch.Tensor,
+        observed_context: torch.Tensor,
         context_mask: torch.Tensor,
-        query_times: torch.Tensor,
+        full_times: torch.Tensor,
     ) -> torch.Tensor:
         """Runs GRU inference for a single sample."""
         if not torch.all(context_times[1:] > context_times[:-1]):
             raise ValueError(
                 "context_times must be strictly increasing for every sample."
             )
-        if not torch.all(query_times[1:] > query_times[:-1]):
+        if not torch.all(full_times[1:] > full_times[:-1]):
             raise ValueError(
-                "query_times must be strictly increasing for every sample."
+                "full_times must be strictly increasing for every sample."
             )
 
         num_context_points = context_times.size(0)
-        if not torch.allclose(query_times[:num_context_points], context_times):
+        if not torch.allclose(full_times[:num_context_points], context_times):
             raise ValueError(
-                "query_times must start with the provided context_times."
+                "full_times must start with the provided context_times."
             )
 
         hidden = torch.zeros(
             1,
             self.hidden_dim,
             device=context_times.device,
-            dtype=context_observations.dtype,
+            dtype=observed_context.dtype,
         )
         previous_time = context_times.new_tensor(self.start_time)
         predictions: List[torch.Tensor] = []
@@ -336,7 +356,7 @@ class GRUTimeSeriesBaseline(nn.Module):
             current_time = context_times[step]
             delta_t = current_time - previous_time
             step_input = self._build_step_input(
-                observation=context_observations[step],
+                observation=observed_context[step],
                 is_observed=context_mask[step],
                 delta_t=delta_t,
             )
@@ -344,10 +364,10 @@ class GRUTimeSeriesBaseline(nn.Module):
             predictions.append(self.readout(hidden))
             previous_time = current_time
 
-        zero_observation = context_observations.new_zeros(self.input_dim)
+        zero_observation = observed_context.new_zeros(self.input_dim)
         zero_mask = context_mask.new_tensor(False)
 
-        for current_time in query_times[num_context_points:]:
+        for current_time in full_times[num_context_points:]:
             delta_t = current_time - previous_time
             step_input = self._build_step_input(
                 observation=zero_observation,
@@ -363,25 +383,27 @@ class GRUTimeSeriesBaseline(nn.Module):
     def forward(
         self,
         context_times: torch.Tensor,
-        context_observations: torch.Tensor,
+        observed_context: torch.Tensor,
         context_mask: torch.Tensor,
-        query_times: torch.Tensor,
+        full_times: torch.Tensor,
     ) -> torch.Tensor:
-        """Predicts values at query_times after conditioning on context."""
+        """Predicts values at full_times after conditioning on observed context."""
+        context_mask = self._normalize_context_mask(context_mask)
+
         self._validate_inputs(
             context_times=context_times,
-            context_observations=context_observations,
+            observed_context=observed_context,
             context_mask=context_mask,
-            query_times=query_times,
+            full_times=full_times,
         )
 
         batch_predictions: List[torch.Tensor] = []
         for batch_index in range(context_times.size(0)):
             sample_predictions = self._forward_single(
                 context_times=context_times[batch_index],
-                context_observations=context_observations[batch_index],
+                observed_context=observed_context[batch_index],
                 context_mask=context_mask[batch_index],
-                query_times=query_times[batch_index],
+                full_times=full_times[batch_index],
             )
             batch_predictions.append(sample_predictions.unsqueeze(0))
 

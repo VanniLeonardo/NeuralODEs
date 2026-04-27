@@ -22,7 +22,12 @@ def masked_mse(
     targets: torch.Tensor,
     mask: torch.Tensor,
 ) -> torch.Tensor:
-    """Computes MSE over a boolean mask."""
+    """Computes mean squared error over a mask.
+
+    Supported mask shapes:
+    - [batch, time]
+    - [batch, time, dim]
+    """
     if mask.dtype != torch.bool:
         mask = mask.bool()
 
@@ -44,25 +49,61 @@ def compute_timeseries_metrics(
     predictions: torch.Tensor,
     batch: BatchDict,
 ) -> Dict[str, torch.Tensor]:
-    """Computes reconstruction/interpolation/extrapolation metrics."""
-    targets = batch["query_targets"]
-    full_mask = torch.ones_like(batch["future_mask"], dtype=torch.bool)
+    """Computes reconstruction/interpolation/extrapolation metrics.
+
+    Batch contract (Anna-aligned):
+    - observed_context: noisy context with zeros at missing positions
+    - context_values: noisy unmasked context values
+    - context_times: context timestamps
+    - context_mask: observed-context mask
+    - interp_mask: hidden-context mask
+    - full_times: context + future timestamps
+    - ground_truth: clean full trajectory
+    - future_mask: future-only mask
+    """
+    ground_truth = batch["ground_truth"]
+
+    batch_size, total_steps, output_dim = predictions.shape
+    context_steps = batch["context_times"].size(1)
+    future_steps = total_steps - context_steps
+
+    if ground_truth.shape != predictions.shape:
+        raise ValueError("ground_truth and predictions must have identical shape.")
+
+    if batch["context_values"].shape != (batch_size, context_steps, output_dim):
+        raise ValueError("context_values shape is inconsistent with predictions.")
+
+    if batch["context_mask"].shape != (batch_size, context_steps, 1):
+        raise ValueError("context_mask must have shape [batch, T_ctx, 1].")
+
+    if batch["interp_mask"].shape != (batch_size, context_steps, 1):
+        raise ValueError("interp_mask must have shape [batch, T_ctx, 1].")
+
+    if batch["future_mask"].shape != (batch_size, future_steps, 1):
+        raise ValueError("future_mask must have shape [batch, T_future, 1].")
+
+    pred_context = predictions[:, :context_steps, :]
+    pred_future = predictions[:, context_steps:, :]
+    gt_context = ground_truth[:, :context_steps, :]
+    gt_future = ground_truth[:, context_steps:, :]
+
+    full_mask = torch.ones_like(ground_truth, dtype=torch.bool)
 
     return {
-        "loss": masked_mse(predictions, targets, full_mask),
+        "loss": masked_mse(predictions, ground_truth, full_mask),
         "observed_mse": masked_mse(
-            predictions,
-            targets,
-            batch["query_observed_mask"],
+            pred_context,
+            batch["context_values"],
+            batch["context_mask"],
         ),
         "interpolation_mse": masked_mse(
-            predictions,
-            targets,
-            batch["interpolation_mask"],
+            pred_context,
+            gt_context,
+            batch["interp_mask"],
         ),
         "extrapolation_mse": masked_mse(
-            predictions,
-            targets,
+            pred_future,
+            gt_future,
             batch["future_mask"],
         ),
     }
@@ -95,9 +136,9 @@ def train_timeseries_epoch(
 
         predictions = model(
             context_times=batch["context_times"],
-            context_observations=batch["context_observations"],
+            observed_context=batch["observed_context"],
             context_mask=batch["context_mask"],
-            query_times=batch["query_times"],
+            full_times=batch["full_times"],
         )
         metrics = compute_timeseries_metrics(predictions, batch)
         loss = metrics["loss"]
@@ -148,9 +189,9 @@ def evaluate_timeseries(
 
         predictions = model(
             context_times=batch["context_times"],
-            context_observations=batch["context_observations"],
+            observed_context=batch["observed_context"],
             context_mask=batch["context_mask"],
-            query_times=batch["query_times"],
+            full_times=batch["full_times"],
         )
         metrics = compute_timeseries_metrics(predictions, batch)
 

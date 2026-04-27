@@ -10,17 +10,17 @@ from kaby.config import ODEConfig
 
 
 class IrregularSineWaveDataset(Dataset):
-    """Synthetic irregular sine-wave dataset for interpolation/extrapolation.
+    """Synthetic irregular sine-wave dataset with Anna-style batch fields.
 
     Each sample contains:
-    - noisy observed context values
-    - clean context targets
-    - irregular context timestamps
-    - context observation mask
-    - interpolation mask
-    - full query timestamps
-    - full clean target trajectory
-    - future mask
+    - observed_context: noisy context values, zero-filled where missing
+    - context_values: noisy context values before masking
+    - context_times: irregular timestamps in the context interval
+    - context_mask: 1 where context is observed, 0 where missing
+    - interp_mask: 1 where context is hidden and used for interpolation
+    - full_times: context_times followed by future times
+    - ground_truth: clean full trajectory over full_times
+    - future_mask: 1 over the future horizon only
     """
 
     def __init__(
@@ -65,20 +65,50 @@ class IrregularSineWaveDataset(Dataset):
         generator = torch.Generator().manual_seed(seed)
         self.samples = [self._generate_sample(generator) for _ in range(num_samples)]
 
-    def _sample_irregular_times(
+    def _sample_context_and_future_times(
         self,
-        low: float,
-        high: float,
-        num_points: int,
         generator: torch.Generator,
-    ) -> torch.Tensor:
-        """Samples strictly ordered irregular timestamps."""
-        times = low + (high - low) * torch.rand(num_points, generator=generator)
-        return torch.sort(times).values.to(dtype=torch.float32)
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Samples strictly increasing context/future times.
+
+        To be a bit closer to Anna's benchmark style:
+        - the first context time is anchored at context_start
+        - the last future time is anchored at future_end
+        """
+        eps = 1e-4
+
+        n_context_inner = self.n_context_points - 1
+        if n_context_inner > 0:
+            context_inner = self.context_start + eps + (
+                self.context_end - self.context_start - 2 * eps
+            ) * torch.rand(n_context_inner, generator=generator)
+            context_inner = torch.sort(context_inner).values
+            context_times = torch.cat(
+                [torch.tensor([self.context_start]), context_inner], dim=0
+            ).to(torch.float32)
+        else:
+            context_times = torch.tensor([self.context_start], dtype=torch.float32)
+
+        n_future_inner = self.n_future_points - 1
+        if n_future_inner > 0:
+            future_inner = self.context_end + eps + (
+                self.future_end - self.context_end - 2 * eps
+            ) * torch.rand(n_future_inner, generator=generator)
+            future_inner = torch.sort(future_inner).values
+            future_times = torch.cat(
+                [future_inner, torch.tensor([self.future_end])], dim=0
+            ).to(torch.float32)
+        else:
+            future_times = torch.tensor([self.future_end], dtype=torch.float32)
+
+        return context_times, future_times
 
     def _sample_observation_mask(self, generator: torch.Generator) -> torch.Tensor:
-        """Samples a context observation mask with valid constraints."""
+        """Samples a context mask and guarantees a usable interpolation task."""
         mask = torch.rand(self.n_context_points, generator=generator) < self.observation_prob
+
+        
+        mask[0] = True
 
         observed_count = int(mask.sum().item())
         if observed_count < self.min_observed_context_points:
@@ -89,10 +119,9 @@ class IrregularSineWaveDataset(Dataset):
                 if observed_count >= self.min_observed_context_points:
                     break
 
-        if int((~mask).sum().item()) == 0:
-            observed_indices = torch.nonzero(mask, as_tuple=False).flatten()
-            flip_index = int(observed_indices[-1].item())
-            mask[flip_index] = False
+        # Ensure at least one missing point remains in the context interval.
+        if int((~mask).sum().item()) == 0 and self.n_context_points > 1:
+            mask[-1] = False
 
         return mask
 
@@ -100,61 +129,37 @@ class IrregularSineWaveDataset(Dataset):
         """Generates one noisy sine-wave trajectory with random phase."""
         phase = 2.0 * math.pi * torch.rand(1, generator=generator).item()
 
-        context_times = self._sample_irregular_times(
-            low=self.context_start,
-            high=self.context_end,
-            num_points=self.n_context_points,
-            generator=generator,
-        )
-        future_times = self._sample_irregular_times(
-            low=self.context_end,
-            high=self.future_end,
-            num_points=self.n_future_points,
-            generator=generator,
-        )
+        context_times, future_times = self._sample_context_and_future_times(generator)
+        full_times = torch.cat([context_times, future_times], dim=0)
 
-        context_targets = torch.sin(context_times + phase).unsqueeze(-1)
-        future_targets = torch.sin(future_times + phase).unsqueeze(-1)
+        ground_truth = torch.sin(full_times + phase).unsqueeze(-1)
 
-        context_mask = self._sample_observation_mask(generator=generator)
-
-        context_noise = self.noise_std * torch.randn(
+        context_values = ground_truth[: self.n_context_points] + self.noise_std * torch.randn(
             self.n_context_points,
             1,
             generator=generator,
         )
-        noisy_context = context_targets + context_noise
 
-        context_observations = torch.where(
-            context_mask.unsqueeze(-1),
-            noisy_context,
-            torch.zeros_like(noisy_context),
+        context_keep = self._sample_observation_mask(generator=generator)
+
+        observed_context = torch.where(
+            context_keep.unsqueeze(-1),
+            context_values,
+            torch.zeros_like(context_values),
         )
 
-        query_times = torch.cat([context_times, future_times], dim=0)
-        query_targets = torch.cat([context_targets, future_targets], dim=0)
-
-        future_mask = torch.zeros(
-            self.n_context_points + self.n_future_points,
-            dtype=torch.bool,
-        )
-        future_mask[self.n_context_points :] = True
-
-        query_observed_mask = torch.zeros_like(future_mask)
-        query_observed_mask[: self.n_context_points] = context_mask
-
-        interpolation_mask = torch.zeros_like(future_mask)
-        interpolation_mask[: self.n_context_points] = ~context_mask
+        context_mask = context_keep.unsqueeze(-1).float()
+        interp_mask = (~context_keep).unsqueeze(-1).float()
+        future_mask = torch.ones(self.n_future_points, 1, dtype=torch.float32)
 
         return {
+            "observed_context": observed_context,
+            "context_values": context_values,
             "context_times": context_times,
-            "context_observations": context_observations,
-            "context_targets": context_targets,
             "context_mask": context_mask,
-            "interpolation_mask": interpolation_mask,
-            "query_times": query_times,
-            "query_targets": query_targets,
-            "query_observed_mask": query_observed_mask,
+            "interp_mask": interp_mask,
+            "full_times": full_times,
+            "ground_truth": ground_truth,
             "future_mask": future_mask,
         }
 
