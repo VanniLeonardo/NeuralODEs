@@ -13,13 +13,27 @@ from training.utils import plot_ode_flows, visualize_2d_features
 console = Console()
 
 
+def get_gpu_memory_stats(device: torch.device) -> dict:
+    """Return GPU memory usage in MB. Empty dict when not on CUDA."""
+    if device.type != "cuda":
+        return {}
+
+    gpu_id = device.index if device.index is not None else torch.cuda.current_device()
+    return {
+        "gpu_mem_allocated_mb": torch.cuda.memory_allocated(gpu_id) / (1024**2),
+        "gpu_mem_reserved_mb": torch.cuda.memory_reserved(gpu_id) / (1024**2),
+        "gpu_mem_peak_allocated_mb": torch.cuda.max_memory_allocated(gpu_id)
+        / (1024**2),
+    }
+
+
 def main() -> None:
     """Entry point: loads config, initializes wandb, runs the training loop."""
 
     # 1. Initialize Configuration and parse overrides
     config = ODEConfig()
     config.hidden_dim = 2  # Force hidden_dim to 2 for vizualization of failure modes
-    config.epochs = 100 
+    config.epochs = 300
     parser = argparse.ArgumentParser(description="Neural ODE training")
     for field, value in config.__dict__.items():
         parser.add_argument(f"--{field}", type=type(value), default=value)
@@ -58,9 +72,18 @@ def main() -> None:
 
     # 6. Training Loop
     for epoch in range(config.epochs):
-        train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
+        if device.type == "cuda":
+            gpu_id = (
+                device.index
+                if device.index is not None
+                else torch.cuda.current_device()
+            )
+            torch.cuda.reset_peak_memory_stats(gpu_id)
 
-        wandb.log({"epoch": epoch, **train_metrics})
+        train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
+        gpu_mem = get_gpu_memory_stats(device)
+
+        wandb.log({"epoch": epoch, **train_metrics, **gpu_mem})
 
         if config.hidden_dim == 2 and epoch % 10 == 0:
             visualize_2d_features(model, train_loader, device, epoch)
@@ -69,13 +92,22 @@ def main() -> None:
             plot_ode_flows(model, train_loader, device, epoch)
 
         if epoch % 5 == 0:
-            console.log(
+            msg = (
                 f"Epoch {epoch:>3} | "
                 f"Loss: {train_metrics['loss']:.4f} | "
                 f"Acc: {train_metrics['accuracy']:.3f} | "
                 f"Fwd NFE: {train_metrics.get('forward_nfe_mean', 0):.1f} | "
                 f"Bwd NFE: {train_metrics.get('backward_nfe_mean', 0):.1f}"
             )
+
+            if gpu_mem:
+                msg += (
+                    f" | GPU Alloc: {gpu_mem['gpu_mem_allocated_mb']:.1f} MB"
+                    f" | GPU Reserved: {gpu_mem['gpu_mem_reserved_mb']:.1f} MB"
+                    f" | GPU Peak: {gpu_mem['gpu_mem_peak_allocated_mb']:.1f} MB"
+                )
+
+            console.log(msg)
 
     wandb.finish()
 
