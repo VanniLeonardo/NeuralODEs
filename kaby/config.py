@@ -1,34 +1,31 @@
 from dataclasses import dataclass
-from typing import Tuple
 
 
 @dataclass
 class ODEConfig:
-    """Central configuration for Neural ODE experiments."""
-    
-    # ODE Solver Parameters
-    solver_type: str = "dopri5"  # dopri5 is Runge-Kutta 4(5)
+    """Configuration for Kaby's standalone ODE-RNN time-series experiments."""
+
+    # ODE solver parameters
+    solver_type: str = "dopri5"
     atol: float = 1e-3
     rtol: float = 1e-3
-    integration_time: Tuple[float, float] = (0.0, 1.0)
-    
-    # Network Architecture
-    in_features: int = 2         # e.g., 2 for 2D synthetic datasets
+
+    # Model architecture
+    in_features: int = 1
     hidden_dim: int = 32
     output_dim: int = 1
-    
-    # Member 3 (ANODE) & Member 5 (Time-Series) overrides
-    augment_dim: int = 0         # Number of zero-dimensions to append
-    is_time_series: bool = False # Flag for ODE-RNN logic
-    model_type: str = "ode_rnn"
 
-    # Training Parameters
+    # Workspace flags
+    is_time_series: bool = True
+    model_type: str = "ode_rnn"   # choices: "ode_rnn", "gru"
+
+    # Training parameters
     batch_size: int = 64
     lr: float = 1e-3
     epochs: int = 50
     seed: int = 28
 
-    # Time-series Parameters
+    # Time-series benchmark parameters
     context_start: float = 0.0
     context_end: float = 5.0
     future_end: float = 10.0
@@ -37,6 +34,8 @@ class ODEConfig:
     min_observed_context_points: int = 2
     observation_prob: float = 0.7
     noise_std: float = 0.1
+
+    # Dataset split sizes
     train_size: int = 2048
     val_size: int = 256
     test_size: int = 256

@@ -111,9 +111,6 @@ def parse_args() -> argparse.Namespace:
 def build_config(args: argparse.Namespace) -> ODEConfig:
     """Builds a dataclass config from CLI overrides."""
     config = ODEConfig()
-    config.is_time_series = True
-    config.in_features = 1
-    config.output_dim = 1
 
     config.model_type = args.model_type
     config.batch_size = args.batch_size
