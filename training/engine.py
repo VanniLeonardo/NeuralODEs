@@ -1,21 +1,25 @@
 import torch
 import torch.nn as nn
-from typing import Dict
+from typing import Dict, List
+
+from training.utils import NFEStats
+
 
 def train_epoch(
-    model: nn.Module, 
-    dataloader: torch.utils.data.DataLoader, 
-    optimizer: torch.optim.Optimizer, 
-    criterion: nn.Module, 
-    device: torch.device
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
+    device: torch.device,
 ) -> Dict[str, float]:
+    """Trains the model for a single epoch."""
     model.train()
     total_loss = 0.0
-    total_nfe = 0
     correct = 0
     total_samples = 0
-    
-    # Reset memory stats at the start of the epoch
+    nfe_stats = NFEStats()
+    has_ode_func = hasattr(model, "ode_func")
+
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
@@ -24,32 +28,71 @@ def train_epoch(
 
         optimizer.zero_grad()
         logits = model(x)
+
+        # Read NFE immediately after forward pass, before adjoint solve
+        forward_nfe = model.ode_func.nfe if has_ode_func else 0
+
         loss = criterion(logits, y)
         loss.backward()
         optimizer.step()
+
+        # NFE_bwd = NFE_total - NFE_fwd
+        if has_ode_func:
+            nfe_stats.record(
+                forward=forward_nfe,
+                backward=model.ode_func.nfe - forward_nfe,
+            )
 
         total_loss += loss.item() * x.size(0)
         preds = torch.argmax(logits, dim=1)
         correct += (preds == y).sum().item()
         total_samples += x.size(0)
-        
-        if hasattr(model, 'ode_func'):
-            total_nfe += model.ode_func.nfe
 
-    avg_loss = total_loss / total_samples
-    accuracy = correct / total_samples
-    
-    # Calculate average NFE safely
-    avg_nfe = total_nfe / len(dataloader) if total_nfe > 0 else 0.0
-    
-    # Get peak memory in Megabytes
-    peak_memory_mb = 0.0
-    if device.type == "cuda":
-        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-
-    return {
-        "loss": avg_loss, 
-        "accuracy": accuracy, 
-        "nfe": avg_nfe,
-        "memory_mb": peak_memory_mb
+    metrics = {
+        "loss": total_loss / total_samples,
+        "accuracy": correct / total_samples,
     }
+    if device.type == "cuda":
+        metrics["memory_mb"] = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+    if nfe_stats:
+        metrics.update(nfe_stats.summary())
+
+    return metrics
+
+
+def eval_epoch(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    criterion: nn.Module,
+    device: torch.device,
+) -> Dict[str, float]:
+    """Evaluates the model for a single epoch without gradient computation."""
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total_samples = 0
+    has_ode_func = hasattr(model, "ode_func")
+    fwd_nfe: List[int] = []
+
+    with torch.no_grad():
+        for x, y in dataloader:
+            x, y = x.to(device), y.to(device)
+            logits = model(x)
+
+            if has_ode_func:
+                fwd_nfe.append(model.ode_func.nfe)
+
+            loss = criterion(logits, y)
+            total_loss += loss.item() * x.size(0)
+            preds = torch.argmax(logits, dim=1)
+            correct += (preds == y).sum().item()
+            total_samples += x.size(0)
+
+    metrics = {
+        "loss": total_loss / total_samples,
+        "accuracy": correct / total_samples,
+    }
+    if fwd_nfe:
+        metrics["forward_nfe_mean"] = sum(fwd_nfe) / len(fwd_nfe)
+
+    return metrics

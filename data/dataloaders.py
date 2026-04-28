@@ -1,52 +1,90 @@
-from torch.utils.data import DataLoader
+import torch
+from torch.utils.data import DataLoader, TensorDataset, random_split
 from torchvision import datasets, transforms
+from typing import Tuple
+
+from data.synthetic import make_circles, make_moons, make_spirals
 
 
-def flatten_tensor(x):
+def flatten_tensor(x: torch.Tensor) -> torch.Tensor:
     return x.view(-1)
 
 
-def get_mnist_dataloaders(batch_size: int, data_root: str = "./data", flatten: bool = True):
-    """
-    Returns train and test dataloaders for MNIST.
+def get_mnist_dataloaders(
+    batch_size: int,
+    data_root: str = "./data",
+    flatten: bool = True,
+) -> Tuple[DataLoader, DataLoader]:
+    """Returns train and test DataLoaders for MNIST.
 
-    IMPORTANT:
-    Images are flattened from [1, 28, 28] to [784] if flatten=True
-    because the model uses linear layers (MLP).
+    Args:
+        batch_size (int): Batch size for both loaders.
+        data_root (str): Directory where MNIST is downloaded.
+        flatten (bool): If True, flattens images from [1, 28, 28] to [784].
     """
-
     transform_list = [transforms.ToTensor()]
     if flatten:
         transform_list.append(transforms.Lambda(flatten_tensor))
-    
     transform = transforms.Compose(transform_list)
 
     train_dataset = datasets.MNIST(
-        root=data_root,
-        train=True,
-        download=True,
-        transform=transform
+        root=data_root, train=True, download=True, transform=transform
     )
-
     test_dataset = datasets.MNIST(
-        root=data_root,
-        train=False,
-        download=True,
-        transform=transform
+        root=data_root, train=False, download=True, transform=transform
     )
 
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=0
     )
-
     test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=0
     )
 
     return train_loader, test_loader
+
+
+_DATASET_REGISTRY = {
+    "circles": make_circles,
+    "spirals": make_spirals,
+    "moons": make_moons,
+}
+
+
+def get_dataloaders(
+    dataset: str = "circles",
+    n_samples: int = 1000,
+    batch_size: int = 64,
+    val_split: float = 0.2,
+    noise: float = 0.05,
+    seed: int = 42,
+) -> Tuple[DataLoader, DataLoader]:
+    """Builds train and validation DataLoaders for a synthetic 2D dataset.
+
+    Args:
+        dataset (str): One of 'circles', 'spirals', 'moons'.
+        n_samples (int): Total dataset size before splitting.
+        batch_size (int): Batch size for both loaders.
+        val_split (float): Fraction of data reserved for validation.
+        noise (float): Noise level forwarded to the generator function.
+        seed (int): Controls both data generation and the train/val split.
+    """
+    if dataset not in _DATASET_REGISTRY:
+        raise ValueError(
+            f"Unknown dataset '{dataset}'. Choose from {list(_DATASET_REGISTRY)}."
+        )
+
+    X, y = _DATASET_REGISTRY[dataset](n_samples=n_samples, noise=noise, seed=seed)
+    full_dataset = TensorDataset(X, y)
+
+    n_val = int(len(full_dataset) * val_split)
+    n_train = len(full_dataset) - n_val
+
+    # seeded generator so split is reproducible independently of data generation
+    generator = torch.Generator().manual_seed(seed)
+    train_ds, val_ds = random_split(full_dataset, [n_train, n_val], generator=generator)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader

@@ -47,6 +47,7 @@ project_root/
 ├── training/
 │   ├── engine.py       # Raw PyTorch train/val step functions
 │   └── utils.py        # Checkpointing, NFE tracking
+├── solver_ablation.py  # NFE and accuracy sweep over solvers and tolerances
 └── notebooks/          # .ipynb files for EDA and final plotting
 
 In case of a modification to the project architecture or scope, update this file.

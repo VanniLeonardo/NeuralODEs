@@ -8,8 +8,10 @@ from models.networks import ODENet, ConvODENet
 from training.engine import train_epoch
 from scripts.plot_fig3 import evaluate_tolerances, plot_figure_3
 
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 @torch.no_grad()
 def evaluate(model, dataloader, criterion, device):
@@ -28,6 +30,7 @@ def evaluate(model, dataloader, criterion, device):
 
     return {"loss": total_loss / total_samples, "accuracy": correct / total_samples}
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=64)
@@ -35,12 +38,15 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--solver", type=str, default="dopri5")
-    parser.add_argument("--network_type", type=str, default="cnn", choices=["mlp", "cnn"])
+    parser.add_argument(
+        "--network_type", type=str, default="cnn", choices=["mlp", "cnn"]
+    )
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
-    
+
     batch_size = args.batch_size
     hidden_dim = args.hidden_dim
     lr = args.lr
@@ -62,11 +68,11 @@ def main():
             "hidden_dim": hidden_dim,
             "lr": lr,
             "epochs": epochs,
-            "solver": solver_type
+            "solver": solver_type,
         },
     )
     # Uncomment the following lines if running a WandB Sweep.
-    # In that case, hyperparameters are automatically provided by WandB instead of CLI arguments. 
+    # In that case, hyperparameters are automatically provided by WandB instead of CLI arguments.
     batch_size = wandb.config.batch_size
     hidden_dim = wandb.config.hidden_dim
     lr = wandb.config.lr
@@ -78,14 +84,23 @@ def main():
     print(f"Running on device: {device} | Network: {network_type.upper()}")
 
     # Determine if we should flatten the image based on network type
-    flatten_img = (network_type == "mlp")
-    train_loader, test_loader = get_mnist_dataloaders(batch_size=batch_size, flatten=flatten_img)
+    flatten_img = network_type == "mlp"
+    train_loader, test_loader = get_mnist_dataloaders(
+        batch_size=batch_size, flatten=flatten_img
+    )
 
     # Initialize the correct architecture
     if network_type == "mlp":
-        model = ODENet(data_dim=784, hidden_dim=hidden_dim, num_classes=10, solver_type=solver_type).to(device)
+        model = ODENet(
+            data_dim=784, hidden_dim=hidden_dim, num_classes=10, solver_type=solver_type
+        ).to(device)
     else:
-        model = ConvODENet(in_channels=1, num_filters=hidden_dim, num_classes=10, solver_type=solver_type).to(device)
+        model = ConvODENet(
+            in_channels=1,
+            num_filters=hidden_dim,
+            num_classes=10,
+            solver_type=solver_type,
+        ).to(device)
 
     n_params = count_parameters(model)
     print(f"Trainable parameters: {n_params}")
@@ -97,23 +112,25 @@ def main():
         train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
         test_metrics = evaluate(model, test_loader, criterion, device)
 
-        wandb.log({
-            "epoch": epoch,
-            "train_loss": train_metrics["loss"],
-            "train_accuracy": train_metrics["accuracy"],
-            "test_loss": test_metrics["loss"],
-            "test_accuracy": test_metrics["accuracy"],
-            "num_parameters": n_params,
-            "forward_nfe": train_metrics["nfe"],
-            "peak_memory_mb": train_metrics["memory_mb"]
-        })
+        wandb.log(
+            {
+                "epoch": epoch,
+                "train_loss": train_metrics["loss"],
+                "train_accuracy": train_metrics["accuracy"],
+                "test_loss": test_metrics["loss"],
+                "test_accuracy": test_metrics["accuracy"],
+                "num_parameters": n_params,
+                "forward_nfe": train_metrics.get("forward_nfe_mean", 0),
+                "peak_memory_mb": train_metrics.get("memory_mb", 0.0),
+            }
+        )
 
         print(
             f"Epoch {epoch} | "
             f"train_acc: {train_metrics['accuracy']:.4f} | "
             f"test_acc: {test_metrics['accuracy']:.4f} | "
-            f"NFE: {train_metrics['nfe']:.1f} | "
-            f"Mem: {train_metrics['memory_mb']:.1f} MB"
+            f"NFE: {train_metrics.get('forward_nfe_mean', 0):.1f} | "
+            f"Mem: {train_metrics.get('memory_mb', 0.0):.1f} MB"
         )
 
     # ==========================================================
@@ -123,15 +140,16 @@ def main():
     # Grab a single batch from the test loader
     x_val, y_val = next(iter(test_loader))
     x_val, y_val = x_val.to(device), y_val.to(device)
-    
+
     # Run the rigorous mathematical evaluation
     results = evaluate_tolerances(model, x_val, y_val)
-    
+
     # Plot and upload to WandB!
     plot_figure_3(results, epoch=epochs)
     print("Figure 3 generated and uploaded to WandB!")
 
     wandb.finish()
+
 
 if __name__ == "__main__":
     main()
