@@ -4,6 +4,8 @@ import argparse
 import copy
 import random
 from typing import Any
+import json
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -11,7 +13,7 @@ import wandb
 
 from kaby.config import ODEConfig
 from kaby.data.timeseries import get_irregular_sine_dataloaders
-from kaby.models.ode_rnn import GRUTimeSeriesBaseline, ODERNN
+from kaby.models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
 from kaby.training.timeseries_engine import evaluate_timeseries, train_timeseries_epoch
 
 try:
@@ -54,8 +56,15 @@ def parse_args() -> argparse.Namespace:
         "--model_type",
         type=str,
         default=defaults.model_type,
-        choices=["ode_rnn", "gru"],
+        choices=["ode_rnn", "gru", "gru_time", "gru_notime"],
     )
+
+    parser.add_argument(
+    "--run_name",
+    type=str,
+    default=None,
+    )
+
     parser.add_argument("--batch_size", type=int, default=defaults.batch_size)
     parser.add_argument("--hidden_dim", type=int, default=defaults.hidden_dim)
     parser.add_argument("--lr", type=float, default=defaults.lr)
@@ -63,6 +72,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--solver", type=str, default=defaults.solver_type)
     parser.add_argument("--atol", type=float, default=defaults.atol)
     parser.add_argument("--rtol", type=float, default=defaults.rtol)
+    
+    parser.add_argument(
+        "--train_loss_mode",
+        type=str,
+        default=defaults.train_loss_mode,
+        choices=["observed_context", "full_trajectory"],
+    )
 
     parser.add_argument("--context_start", type=float, default=defaults.context_start)
     parser.add_argument("--context_end", type=float, default=defaults.context_end)
@@ -112,7 +128,7 @@ def build_config(args: argparse.Namespace) -> ODEConfig:
     """Builds a dataclass config from CLI overrides."""
     config = ODEConfig()
 
-    config.model_type = args.model_type
+    config.model_type = "gru_time" if args.model_type == "gru" else args.model_type
     config.batch_size = args.batch_size
     config.hidden_dim = args.hidden_dim
     config.lr = args.lr
@@ -120,6 +136,8 @@ def build_config(args: argparse.Namespace) -> ODEConfig:
     config.solver_type = args.solver
     config.atol = args.atol
     config.rtol = args.rtol
+    config.train_loss_mode = args.train_loss_mode
+
 
     config.context_start = args.context_start
     config.context_end = args.context_end
@@ -151,11 +169,46 @@ def build_model(config: ODEConfig) -> torch.nn.Module:
             start_time=config.context_start,
         )
 
-    return GRUTimeSeriesBaseline(
-        input_dim=config.in_features,
-        hidden_dim=config.hidden_dim,
-        output_dim=config.output_dim,
-        start_time=config.context_start,
+    if config.model_type == "gru_time":
+        return GRUTimeSeriesBaseline(
+            input_dim=config.in_features,
+            hidden_dim=config.hidden_dim,
+            output_dim=config.output_dim,
+            start_time=config.context_start,
+        )
+
+    if config.model_type == "gru_notime":
+        return GRUNoTimeBaseline(
+            input_dim=config.in_features,
+            hidden_dim=config.hidden_dim,
+            output_dim=config.output_dim,
+            start_time=config.context_start,
+        )
+
+    raise ValueError(f"Unsupported model_type={config.model_type!r}")
+
+def _json_safe(value: Any) -> Any:
+    """Converts values into JSON-serializable Python objects."""
+    if isinstance(value, torch.device):
+        return str(value)
+    if isinstance(value, (np.floating, np.integer)):
+        return value.item()
+    if isinstance(value, dict):
+        return {key: _json_safe(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(val) for val in value]
+    return value
+
+
+def build_default_run_name(config: ODEConfig) -> str:
+    """Builds a compact run tag for local result files."""
+    return (
+        f"{config.model_type}"
+        f"_loss-{config.train_loss_mode}"
+        f"_seed-{config.seed}"
+        f"_ctx-{config.n_context_points}"
+        f"_fut-{config.n_future_points}"
+        f"_hid-{config.hidden_dim}"
     )
 
 
@@ -183,17 +236,23 @@ def main() -> None:
     console.rule("Irregular Time-Series Experiment")
     console.print(f"Device: {device}")
     console.print(f"Model: {config.model_type}")
+    console.print(f"Train loss mode: {config.train_loss_mode}")
+    console.print("Checkpoint selection metric: val_interpolation_mse")
     console.print(f"Trainable parameters: {num_parameters}")
 
-    best_val_loss = float("inf")
+    best_val_interp = float("inf")
     best_state_dict = copy.deepcopy(model.state_dict())
 
+    history: list[dict[str, object]] = []
+
     for epoch in range(1, config.epochs + 1):
+        
         train_metrics = train_timeseries_epoch(
             model=model,
             dataloader=train_loader,
             optimizer=optimizer,
             device=device,
+            loss_mode=config.train_loss_mode,
         )
         val_metrics = evaluate_timeseries(
             model=model,
@@ -201,8 +260,8 @@ def main() -> None:
             device=device,
         )
 
-        if val_metrics["loss"] < best_val_loss:
-            best_val_loss = val_metrics["loss"]
+        if val_metrics["interpolation_mse"] < best_val_interp:
+            best_val_interp = val_metrics["interpolation_mse"]
             best_state_dict = copy.deepcopy(model.state_dict())
 
         wandb.log(
@@ -220,6 +279,27 @@ def main() -> None:
                 "val_interpolation_mse": val_metrics["interpolation_mse"],
                 "val_extrapolation_mse": val_metrics["extrapolation_mse"],
                 "val_forward_nfe_per_sample": val_metrics["nfe_per_sample"],
+                "best_val_interpolation_mse": best_val_interp,
+            }
+        )
+        
+        history.append(
+            {
+                "epoch": epoch,
+                "train_loss": float(train_metrics["loss"]),
+                "train_observed_mse": float(train_metrics["observed_mse"]),
+                "train_interpolation_mse": float(train_metrics["interpolation_mse"]),
+                "train_extrapolation_mse": float(train_metrics["extrapolation_mse"])
+                if train_metrics["extrapolation_mse"] == train_metrics["extrapolation_mse"]
+                else None,
+                "train_forward_nfe_per_sample": float(train_metrics["nfe_per_sample"]),
+                "train_peak_memory_mb": float(train_metrics["memory_mb"]),
+                "val_loss": float(val_metrics["loss"]),
+                "val_observed_mse": float(val_metrics["observed_mse"]),
+                "val_interpolation_mse": float(val_metrics["interpolation_mse"]),
+                "val_extrapolation_mse": float(val_metrics["extrapolation_mse"]),
+                "val_forward_nfe_per_sample": float(val_metrics["nfe_per_sample"]),
+                "best_val_interpolation_mse": float(best_val_interp),
             }
         )
 
@@ -242,7 +322,7 @@ def main() -> None:
 
     wandb.log(
         {
-            "best_val_loss": best_val_loss,
+            "best_val_interpolation_mse": best_val_interp,
             "test_loss": test_metrics["loss"],
             "test_observed_mse": test_metrics["observed_mse"],
             "test_interpolation_mse": test_metrics["interpolation_mse"],
@@ -253,6 +333,30 @@ def main() -> None:
 
     console.rule("Final Test Metrics")
     console.print(test_metrics)
+
+    results_dir = Path("kaby/results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    run_tag = args.run_name if args.run_name is not None else build_default_run_name(config)
+    result_path = results_dir / f"{run_tag}.json"
+
+    result_payload = {
+        "run_name": run_tag,
+        "model_type": config.model_type,
+        "train_loss_mode": config.train_loss_mode,
+        "num_parameters": num_parameters,
+        "config": _json_safe(config.__dict__),
+        "best_val_interpolation_mse": float(best_val_interp),
+        "test_metrics": _json_safe(
+            {key: float(value) for key, value in test_metrics.items()}
+        ),
+        "history": _json_safe(history),
+    }
+
+    with result_path.open("w", encoding="utf-8") as f:
+        json.dump(result_payload, f, indent=2)
+
+    console.print(f"Saved results to: {result_path}")
 
     wandb.finish()
 

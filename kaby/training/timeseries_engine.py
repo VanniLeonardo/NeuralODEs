@@ -45,22 +45,47 @@ def masked_mse(
     return torch.masked_select(squared_error, expanded_mask).mean()
 
 
+def compute_context_training_metrics(
+    context_predictions: torch.Tensor,
+    batch: BatchDict,
+) -> Dict[str, torch.Tensor]:
+    """Metrics for Anna-aligned training: query context only, optimize observed context only."""
+    batch_size, context_steps, output_dim = context_predictions.shape
+
+    if batch["context_values"].shape != (batch_size, context_steps, output_dim):
+        raise ValueError("context_values shape is inconsistent with context_predictions.")
+
+    if batch["context_mask"].shape != (batch_size, context_steps, 1):
+        raise ValueError("context_mask must have shape [batch, T_ctx, 1].")
+
+    if batch["interp_mask"].shape != (batch_size, context_steps, 1):
+        raise ValueError("interp_mask must have shape [batch, T_ctx, 1].")
+
+    gt_context = batch["ground_truth"][:, :context_steps, :]
+
+    observed_mse = masked_mse(
+        context_predictions,
+        batch["context_values"],
+        batch["context_mask"],
+    )
+    interpolation_mse = masked_mse(
+        context_predictions,
+        gt_context,
+        batch["interp_mask"],
+    )
+
+    return {
+        "loss": observed_mse,
+        "observed_mse": observed_mse,
+        "interpolation_mse": interpolation_mse,
+    }
+
+
 def compute_timeseries_metrics(
     predictions: torch.Tensor,
     batch: BatchDict,
 ) -> Dict[str, torch.Tensor]:
-    """Computes reconstruction/interpolation/extrapolation metrics.
-
-    Batch contract (Anna-aligned):
-    - observed_context: noisy context with zeros at missing positions
-    - context_values: noisy unmasked context values
-    - context_times: context timestamps
-    - context_mask: observed-context mask
-    - interp_mask: hidden-context mask
-    - full_times: context + future timestamps
-    - ground_truth: clean full trajectory
-    - future_mask: future-only mask
-    """
+    """Computes reconstruction/interpolation/extrapolation metrics."""
     ground_truth = batch["ground_truth"]
 
     batch_size, total_steps, output_dim = predictions.shape
@@ -114,6 +139,7 @@ def train_timeseries_epoch(
     dataloader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    loss_mode: str = "observed_context",
 ) -> Dict[str, float]:
     """Runs one training epoch for time-series forecasting."""
     model.train()
@@ -122,6 +148,7 @@ def train_timeseries_epoch(
     total_observed_mse = 0.0
     total_interpolation_mse = 0.0
     total_extrapolation_mse = 0.0
+    total_extrapolation_count = 0
     total_nfe = 0.0
     total_samples = 0
 
@@ -134,22 +161,44 @@ def train_timeseries_epoch(
 
         optimizer.zero_grad()
 
-        predictions = model(
-            context_times=batch["context_times"],
-            observed_context=batch["observed_context"],
-            context_mask=batch["context_mask"],
-            full_times=batch["full_times"],
-        )
-        metrics = compute_timeseries_metrics(predictions, batch)
-        loss = metrics["loss"]
+        if loss_mode == "observed_context":
+            predictions = model(
+                context_times=batch["context_times"],
+                observed_context=batch["observed_context"],
+                context_mask=batch["context_mask"],
+                full_times=batch["context_times"],
+            )
+            metrics = compute_context_training_metrics(predictions, batch)
+            extrapolation_value = None
 
+        elif loss_mode == "full_trajectory":
+            predictions = model(
+                context_times=batch["context_times"],
+                observed_context=batch["observed_context"],
+                context_mask=batch["context_mask"],
+                full_times=batch["full_times"],
+            )
+            metrics = compute_timeseries_metrics(predictions, batch)
+            extrapolation_value = metrics["extrapolation_mse"].item()
+
+        else:
+            raise ValueError(
+                f"Unknown loss_mode={loss_mode!r}. "
+                "Expected 'observed_context' or 'full_trajectory'."
+            )
+
+        loss = metrics["loss"]
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item() * batch_size
         total_observed_mse += metrics["observed_mse"].item() * batch_size
         total_interpolation_mse += metrics["interpolation_mse"].item() * batch_size
-        total_extrapolation_mse += metrics["extrapolation_mse"].item() * batch_size
+
+        if extrapolation_value is not None:
+            total_extrapolation_mse += extrapolation_value * batch_size
+            total_extrapolation_count += batch_size
+
         total_nfe += float(getattr(model, "get_nfe", lambda: 0)())
         total_samples += batch_size
 
@@ -161,7 +210,11 @@ def train_timeseries_epoch(
         "loss": total_loss / total_samples,
         "observed_mse": total_observed_mse / total_samples,
         "interpolation_mse": total_interpolation_mse / total_samples,
-        "extrapolation_mse": total_extrapolation_mse / total_samples,
+        "extrapolation_mse": (
+            total_extrapolation_mse / total_extrapolation_count
+            if total_extrapolation_count > 0
+            else float("nan")
+        ),
         "nfe_per_sample": total_nfe / total_samples if total_samples > 0 else 0.0,
         "memory_mb": peak_memory_mb,
     }

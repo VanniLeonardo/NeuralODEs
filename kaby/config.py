@@ -23,19 +23,20 @@ class ODEConfig:
     batch_size: int = 64
     lr: float = 1e-3
     epochs: int = 50
-    seed: int = 28
+    seed: int = 42
+    train_loss_mode: str = "observed_context"  # choices: "observed_context", "full_trajectory"
 
     # Time-series benchmark parameters
     context_start: float = 0.0
     context_end: float = 5.0
     future_end: float = 10.0
-    n_context_points: int = 20
-    n_future_points: int = 20
+    n_context_points: int = 50
+    n_future_points: int = 50
     min_observed_context_points: int = 2
-    observation_prob: float = 0.7
+    observation_prob: float = 0.8
     noise_std: float = 0.1
 
     # Dataset split sizes
-    train_size: int = 2048
-    val_size: int = 256
-    test_size: int = 256
+    train_size: int = 500
+    val_size: int = 100
+    test_size: int = 100

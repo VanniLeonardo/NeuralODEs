@@ -1,9 +1,16 @@
 import pytest
 import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
 
+from kaby.training.timeseries_engine import (
+    compute_context_training_metrics,
+    compute_timeseries_metrics,
+    evaluate_timeseries,
+    train_timeseries_epoch,
+)
 from kaby.data.timeseries import IrregularSineWaveDataset
-from kaby.models.ode_rnn import GRUTimeSeriesBaseline, ODERNN
-
+from kaby.models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
 
 def _build_batch(batch_size: int = 3) -> dict[str, torch.Tensor]:
     dataset = IrregularSineWaveDataset(
@@ -20,6 +27,43 @@ def _build_batch(batch_size: int = 3) -> dict[str, torch.Tensor]:
         key: torch.stack([sample[key] for sample in samples], dim=0)
         for key in samples[0].keys()
     }
+
+def _build_manual_metric_batch() -> dict[str, torch.Tensor]:
+    """Tiny hand-crafted batch for exact metric checks."""
+    return {
+        "observed_context": torch.tensor([[[10.0], [0.0]]]),   # not used by metric fns directly
+        "context_values": torch.tensor([[[10.0], [20.0]]]),    # noisy context targets
+        "context_times": torch.tensor([[0.0, 1.0]]),
+        "context_mask": torch.tensor([[[1.0], [0.0]]]),        # first observed, second hidden
+        "interp_mask": torch.tensor([[[0.0], [1.0]]]),         # second point is interpolation target
+        "full_times": torch.tensor([[0.0, 1.0, 2.0]]),
+        "ground_truth": torch.tensor([[[100.0], [200.0], [300.0]]]),
+        "future_mask": torch.tensor([[[1.0]]]),
+    }
+
+
+class RecordingConstantModel(nn.Module):
+    """Minimal model that records query length and returns a learned constant."""
+
+    def __init__(self, output_dim: int = 1, constant: float = 0.0) -> None:
+        super().__init__()
+        self.bias = nn.Parameter(torch.tensor(float(constant)))
+        self.output_dim = output_dim
+        self.last_query_steps: int | None = None
+
+    def forward(
+        self,
+        context_times: torch.Tensor,
+        observed_context: torch.Tensor,
+        context_mask: torch.Tensor,
+        full_times: torch.Tensor,
+    ) -> torch.Tensor:
+        self.last_query_steps = full_times.size(1)
+        batch_size, query_steps = full_times.shape
+        return self.bias.view(1, 1, 1).expand(batch_size, query_steps, self.output_dim)
+
+    def get_nfe(self) -> int:
+        return 0
 
 
 def test_irregular_sine_dataset_masks_are_consistent() -> None:
@@ -72,6 +116,23 @@ def test_ode_rnn_shape_consistency() -> None:
 def test_gru_baseline_shape_consistency() -> None:
     batch = _build_batch()
     model = GRUTimeSeriesBaseline(
+        input_dim=1,
+        hidden_dim=8,
+        output_dim=1,
+    )
+
+    predictions = model(
+        context_times=batch["context_times"],
+        observed_context=batch["observed_context"],
+        context_mask=batch["context_mask"],
+        full_times=batch["full_times"],
+    )
+
+    assert predictions.shape == batch["ground_truth"].shape
+
+def test_gru_no_time_baseline_shape_consistency() -> None:
+    batch = _build_batch()
+    model = GRUNoTimeBaseline(
         input_dim=1,
         hidden_dim=8,
         output_dim=1,
@@ -152,3 +213,119 @@ def test_ode_rnn_device_agnostic() -> None:
     )
 
     assert predictions.device == device
+
+
+def test_context_only_training_metrics_are_well_defined() -> None:
+    batch = _build_batch(batch_size=2)
+    model = ODERNN(
+        input_dim=1,
+        hidden_dim=8,
+        output_dim=1,
+        solver_type="rk4",
+    )
+
+    context_predictions = model(
+        context_times=batch["context_times"],
+        observed_context=batch["observed_context"],
+        context_mask=batch["context_mask"],
+        full_times=batch["context_times"],
+    )
+
+    metrics = compute_context_training_metrics(context_predictions, batch)
+
+    assert set(metrics.keys()) == {"loss", "observed_mse", "interpolation_mse"}
+    assert metrics["loss"].ndim == 0
+    assert torch.allclose(metrics["loss"], metrics["observed_mse"])
+
+
+def test_compute_timeseries_metrics_matches_manual_values() -> None:
+    batch = _build_manual_metric_batch()
+    predictions = torch.tensor([[[1.0], [2.0], [3.0]]])
+
+    metrics = compute_timeseries_metrics(predictions, batch)
+
+    # observed_mse: only first context point is observed -> (1 - 10)^2 = 81
+    assert torch.isclose(metrics["observed_mse"], torch.tensor(81.0))
+
+    # interpolation_mse: only second context point is hidden -> (2 - 200)^2 = 39204
+    assert torch.isclose(metrics["interpolation_mse"], torch.tensor(39204.0))
+
+    # extrapolation_mse: only future point -> (3 - 300)^2 = 88209
+    assert torch.isclose(metrics["extrapolation_mse"], torch.tensor(88209.0))
+
+    # full loss against ground_truth over all three points
+    expected_full = torch.tensor(((1 - 100) ** 2 + (2 - 200) ** 2 + (3 - 300) ** 2) / 3.0)
+    assert torch.isclose(metrics["loss"], expected_full)
+
+
+def test_compute_context_training_metrics_matches_manual_values() -> None:
+    batch = _build_manual_metric_batch()
+    context_predictions = torch.tensor([[[1.0], [2.0]]])
+
+    metrics = compute_context_training_metrics(context_predictions, batch)
+
+    # training loss in observed_context mode should equal observed_mse
+    assert torch.isclose(metrics["loss"], torch.tensor(81.0))
+    assert torch.isclose(metrics["observed_mse"], torch.tensor(81.0))
+
+    # interpolation metric still checks hidden context points against clean GT
+    assert torch.isclose(metrics["interpolation_mse"], torch.tensor(39204.0))
+
+
+def test_train_timeseries_epoch_observed_context_queries_context_only() -> None:
+    batch = _build_batch(batch_size=2)
+    dataloader = DataLoader([batch], batch_size=None)
+
+    model = RecordingConstantModel(output_dim=1, constant=0.0)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+
+    metrics = train_timeseries_epoch(
+        model=model,
+        dataloader=dataloader,
+        optimizer=optimizer,
+        device=torch.device("cpu"),
+        loss_mode="observed_context",
+    )
+
+    assert model.last_query_steps == batch["context_times"].size(1)
+    assert "loss" in metrics
+    assert "interpolation_mse" in metrics
+    assert metrics["nfe_per_sample"] == 0.0
+
+
+def test_train_timeseries_epoch_full_trajectory_queries_full_times() -> None:
+    batch = _build_batch(batch_size=2)
+    dataloader = DataLoader([batch], batch_size=None)
+
+    model = RecordingConstantModel(output_dim=1, constant=0.0)
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+
+    metrics = train_timeseries_epoch(
+        model=model,
+        dataloader=dataloader,
+        optimizer=optimizer,
+        device=torch.device("cpu"),
+        loss_mode="full_trajectory",
+    )
+
+    assert model.last_query_steps == batch["full_times"].size(1)
+    assert "extrapolation_mse" in metrics
+    assert metrics["nfe_per_sample"] == 0.0
+
+
+def test_evaluate_timeseries_queries_full_times() -> None:
+    batch = _build_batch(batch_size=2)
+    dataloader = DataLoader([batch], batch_size=None)
+
+    model = RecordingConstantModel(output_dim=1, constant=0.0)
+
+    metrics = evaluate_timeseries(
+        model=model,
+        dataloader=dataloader,
+        device=torch.device("cpu"),
+    )
+
+    assert model.last_query_steps == batch["full_times"].size(1)
+    assert "loss" in metrics
+    assert "extrapolation_mse" in metrics
+    assert metrics["nfe_per_sample"] == 0.0

@@ -1,0 +1,72 @@
+{
+  "run_name": "smoke_gru_notime",
+  "model_type": "gru_notime",
+  "train_loss_mode": "observed_context",
+  "num_parameters": 4545,
+  "config": {
+    "solver_type": "dopri5",
+    "atol": 0.001,
+    "rtol": 0.001,
+    "in_features": 1,
+    "hidden_dim": 32,
+    "output_dim": 1,
+    "is_time_series": true,
+    "model_type": "gru_notime",
+    "batch_size": 16,
+    "lr": 0.001,
+    "epochs": 2,
+    "seed": 42,
+    "train_loss_mode": "observed_context",
+    "context_start": 0.0,
+    "context_end": 5.0,
+    "future_end": 10.0,
+    "n_context_points": 8,
+    "n_future_points": 8,
+    "min_observed_context_points": 2,
+    "observation_prob": 0.8,
+    "noise_std": 0.1,
+    "train_size": 128,
+    "val_size": 64,
+    "test_size": 64
+  },
+  "best_val_interpolation_mse": 0.4636249616742134,
+  "test_metrics": {
+    "loss": 0.4822792559862137,
+    "observed_mse": 0.44428908079862595,
+    "interpolation_mse": 0.5140563994646072,
+    "extrapolation_mse": 0.5087415650486946,
+    "nfe_per_sample": 0.0
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.5488318502902985,
+      "train_observed_mse": 0.5488318502902985,
+      "train_interpolation_mse": 0.5466612763702869,
+      "train_extrapolation_mse": null,
+      "train_forward_nfe_per_sample": 0.0,
+      "train_peak_memory_mb": 17.8173828125,
+      "val_loss": 0.5025466680526733,
+      "val_observed_mse": 0.5117257609963417,
+      "val_interpolation_mse": 0.4805276542901993,
+      "val_extrapolation_mse": 0.5057293772697449,
+      "val_forward_nfe_per_sample": 0.0,
+      "best_val_interpolation_mse": 0.4805276542901993
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.48509733751416206,
+      "train_observed_mse": 0.48509733751416206,
+      "train_interpolation_mse": 0.5373001582920551,
+      "train_extrapolation_mse": null,
+      "train_forward_nfe_per_sample": 0.0,
+      "train_peak_memory_mb": 17.8173828125,
+      "val_loss": 0.4774084612727165,
+      "val_observed_mse": 0.4526972323656082,
+      "val_interpolation_mse": 0.4636249616742134,
+      "val_extrapolation_mse": 0.5056112036108971,
+      "val_forward_nfe_per_sample": 0.0,
+      "best_val_interpolation_mse": 0.4636249616742134
+    }
+  ]
+}
