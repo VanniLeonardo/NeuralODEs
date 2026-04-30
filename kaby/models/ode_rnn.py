@@ -6,8 +6,25 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint_adjoint as odeint
 
-from models.continuous import ODEFunc
+class ODEFunc(nn.Module):
+    """Local copy of the shared repo ODEFunc for Kaby's standalone ODE-RNN."""
 
+    def __init__(self, in_features: int, hidden_dim: int) -> None:
+        super().__init__()
+        self.nfe = 0
+        self.net = nn.Sequential(
+            nn.Linear(in_features + 1, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, in_features),
+        )
+
+    def forward(self, t: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+        self.nfe += 1
+        t_expanded = torch.ones_like(h[:, :1]) * t
+        h_time = torch.cat([h, t_expanded], dim=1)
+        return self.net(h_time)
 
 class ODERNN(nn.Module):
     """Standalone ODE-RNN for irregularly sampled time series.

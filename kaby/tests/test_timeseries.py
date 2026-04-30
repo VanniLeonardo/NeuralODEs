@@ -329,3 +329,57 @@ def test_evaluate_timeseries_queries_full_times() -> None:
     assert "loss" in metrics
     assert "extrapolation_mse" in metrics
     assert metrics["nfe_per_sample"] == 0.0
+
+
+def test_evaluate_timeseries_reports_both_nfe_normalizations() -> None:
+    batch = _build_batch(batch_size=2)
+    dataloader = DataLoader([batch], batch_size=None)
+
+    model = RecordingConstantModel(output_dim=1, constant=0.0)
+
+    metrics = evaluate_timeseries(
+        model=model,
+        dataloader=dataloader,
+        device=torch.device("cpu"),
+    )
+
+    assert "nfe_per_sample" in metrics
+    assert "nfe_per_batch" in metrics
+    assert metrics["nfe_per_sample"] == 0.0
+    assert metrics["nfe_per_batch"] == 0.0
+
+def test_multidim_sine_dataset_shapes_are_consistent() -> None:
+    dataset = IrregularSineWaveDataset(
+        num_samples=2,
+        n_context_points=6,
+        n_future_points=4,
+        input_dim=3,
+        signal_type="sine",
+        seed=123,
+    )
+    sample = dataset[0]
+
+    assert sample["observed_context"].shape == (6, 3)
+    assert sample["context_values"].shape == (6, 3)
+    assert sample["context_mask"].shape == (6, 1)
+    assert sample["interp_mask"].shape == (6, 1)
+    assert sample["ground_truth"].shape == (10, 3)
+    assert sample["future_mask"].shape == (4, 1)    
+
+def test_spiral_dataset_shapes_are_consistent() -> None:
+    dataset = IrregularSineWaveDataset(
+        num_samples=2,
+        n_context_points=6,
+        n_future_points=4,
+        input_dim=2,
+        signal_type="spiral",
+        seed=123,
+    )
+    sample = dataset[0]
+
+    assert sample["observed_context"].shape == (6, 2)
+    assert sample["context_values"].shape == (6, 2)
+    assert sample["context_mask"].shape == (6, 1)
+    assert sample["interp_mask"].shape == (6, 1)
+    assert sample["ground_truth"].shape == (10, 2)
+    assert sample["future_mask"].shape == (4, 1)

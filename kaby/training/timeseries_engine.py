@@ -151,6 +151,7 @@ def train_timeseries_epoch(
     total_extrapolation_count = 0
     total_nfe = 0.0
     total_samples = 0
+    total_batches = 0
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -201,6 +202,7 @@ def train_timeseries_epoch(
 
         total_nfe += float(getattr(model, "get_nfe", lambda: 0)())
         total_samples += batch_size
+        total_batches += 1
 
     peak_memory_mb = 0.0
     if device.type == "cuda":
@@ -216,6 +218,7 @@ def train_timeseries_epoch(
             else float("nan")
         ),
         "nfe_per_sample": total_nfe / total_samples if total_samples > 0 else 0.0,
+        "nfe_per_batch": total_nfe / total_batches if total_batches > 0 else 0.0,
         "memory_mb": peak_memory_mb,
     }
 
@@ -235,6 +238,7 @@ def evaluate_timeseries(
     total_extrapolation_mse = 0.0
     total_nfe = 0.0
     total_samples = 0
+    total_batches = 0
 
     for batch in dataloader:
         batch = move_batch_to_device(batch, device)
@@ -254,6 +258,7 @@ def evaluate_timeseries(
         total_extrapolation_mse += metrics["extrapolation_mse"].item() * batch_size
         total_nfe += float(getattr(model, "get_nfe", lambda: 0)())
         total_samples += batch_size
+        total_batches += 1
 
     return {
         "loss": total_loss / total_samples,
@@ -261,4 +266,5 @@ def evaluate_timeseries(
         "interpolation_mse": total_interpolation_mse / total_samples,
         "extrapolation_mse": total_extrapolation_mse / total_samples,
         "nfe_per_sample": total_nfe / total_samples if total_samples > 0 else 0.0,
-    }
+        "nfe_per_batch": total_nfe / total_batches if total_batches > 0 else 0.0,
+    }   

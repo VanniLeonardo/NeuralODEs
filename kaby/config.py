@@ -13,12 +13,17 @@ class ODEConfig:
     # Model architecture
     in_features: int = 1
     hidden_dim: int = 32
+    ode_hidden_dim: int | None = None
+    gru_time_hidden_dim: int | None = None
+    gru_notime_hidden_dim: int | None = None
+    input_dim: int = 1
     output_dim: int = 1
+    signal_type: str = "sine"
 
     # Workspace flags
     is_time_series: bool = True
-    model_type: str = "ode_rnn"   # choices: "ode_rnn", "gru"
-
+    model_type: str = "ode_rnn"   # choices: "ode_rnn", "gru_time", "gru_notime" (CLI also accepts alias "gru")
+    
     # Training parameters
     batch_size: int = 64
     lr: float = 1e-3
@@ -34,7 +39,7 @@ class ODEConfig:
     n_future_points: int = 50
     min_observed_context_points: int = 2
     observation_prob: float = 0.8
-    noise_std: float = 0.1
+    noise_std: float = 0.01
 
     # Dataset split sizes
     train_size: int = 500

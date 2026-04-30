@@ -10,17 +10,10 @@ from kaby.config import ODEConfig
 
 
 class IrregularSineWaveDataset(Dataset):
-    """Synthetic irregular sine-wave dataset with Anna-style batch fields.
+    """Synthetic irregular time-series dataset with Anna-style batch fields.
 
-    Each sample contains:
-    - observed_context: noisy context values, zero-filled where missing
-    - context_values: noisy context values before masking
-    - context_times: irregular timestamps in the context interval
-    - context_mask: 1 where context is observed, 0 where missing
-    - interp_mask: 1 where context is hidden and used for interpolation
-    - full_times: context_times followed by future times
-    - ground_truth: clean full trajectory over full_times
-    - future_mask: 1 over the future horizon only
+    Supports multiple signal families through `signal_type`, while keeping the
+    same batch contract used by the Kaby time-series models.
     """
 
     def __init__(
@@ -34,6 +27,8 @@ class IrregularSineWaveDataset(Dataset):
         min_observed_context_points: int = 2,
         observation_prob: float = 0.7,
         noise_std: float = 0.1,
+        input_dim: int = 1,
+        signal_type: str = "sine",
         seed: int = 42,
     ) -> None:
         super().__init__()
@@ -61,6 +56,8 @@ class IrregularSineWaveDataset(Dataset):
         self.min_observed_context_points = min_observed_context_points
         self.observation_prob = observation_prob
         self.noise_std = noise_std
+        self.input_dim = input_dim
+        self.signal_type = signal_type
 
         generator = torch.Generator().manual_seed(seed)
         self.samples = [self._generate_sample(generator) for _ in range(num_samples)]
@@ -126,31 +123,29 @@ class IrregularSineWaveDataset(Dataset):
         return mask
 
     def _generate_sample(self, generator: torch.Generator) -> Dict[str, torch.Tensor]:
-        """Generates one noisy sine-wave trajectory with random phase."""
-        phase = 2.0 * math.pi * torch.rand(1, generator=generator).item()
-
+        """Builds train/val/test dataloaders for the synthetic sine benchmark."""
         context_times, future_times = self._sample_context_and_future_times(generator)
         full_times = torch.cat([context_times, future_times], dim=0)
 
-        ground_truth = torch.sin(full_times + phase).unsqueeze(-1)
+        ground_truth = self._generate_signal(full_times, generator)
 
         context_values = ground_truth[: self.n_context_points] + self.noise_std * torch.randn(
             self.n_context_points,
-            1,
+            self.input_dim,
             generator=generator,
         )
 
         context_keep = self._sample_observation_mask(generator=generator)
 
-        observed_context = torch.where(
-            context_keep.unsqueeze(-1),
-            context_values,
-            torch.zeros_like(context_values),
-        )
-
         context_mask = context_keep.unsqueeze(-1).float()
         interp_mask = (~context_keep).unsqueeze(-1).float()
         future_mask = torch.ones(self.n_future_points, 1, dtype=torch.float32)
+
+        observed_context = torch.where(
+            context_mask.bool(),
+            context_values,
+            torch.zeros_like(context_values),
+        )
 
         return {
             "observed_context": observed_context,
@@ -169,14 +164,66 @@ class IrregularSineWaveDataset(Dataset):
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         sample = self.samples[index]
         return {key: value.clone() for key, value in sample.items()}
+    def _generate_signal(
+        self,
+        t: torch.Tensor,
+        generator: torch.Generator,
+    ) -> torch.Tensor:
+        """Generates the clean signal on time grid t with shape [T, input_dim]."""
+        signal_type = self.signal_type
+
+        if signal_type == "sine" and self.input_dim == 1:
+            phase = 2.0 * math.pi * torch.rand(1, generator=generator)
+            return torch.sin(t.unsqueeze(-1) + phase)
+
+        if signal_type == "sine" and self.input_dim > 1:
+            phases = 2.0 * math.pi * torch.rand(self.input_dim, generator=generator)
+            return torch.sin(t.unsqueeze(-1) + phases)
+
+        if signal_type == "spiral":
+            if self.input_dim != 2:
+                raise ValueError("spiral requires input_dim=2")
+
+            omega = 0.5 + 1.5 * torch.rand(1, generator=generator)
+            phase = 2.0 * math.pi * torch.rand(1, generator=generator)
+            alpha = 0.05 + 0.10 * torch.rand(1, generator=generator)
+            r0 = 0.8 + 0.4 * torch.rand(1, generator=generator)
+
+            r = r0 * torch.exp(-alpha * t)
+            x = r * torch.cos(omega * t + phase)
+            y = r * torch.sin(omega * t + phase)
+            return torch.stack([x, y], dim=-1)
+
+        if signal_type == "damped":
+            if self.input_dim != 2:
+                raise ValueError("damped requires input_dim=2")
+
+            omega1 = 0.5 + 1.5 * torch.rand(1, generator=generator)
+            omega2 = omega1 * (1.0 + 0.3 * torch.rand(1, generator=generator))
+            phase1 = 2.0 * math.pi * torch.rand(1, generator=generator)
+            phase2 = 2.0 * math.pi * torch.rand(1, generator=generator)
+            alpha = 0.05 + 0.05 * torch.rand(1, generator=generator)
+
+            damp = torch.exp(-alpha * t)
+            x = damp * torch.sin(omega1 * t + phase1)
+            y = damp * torch.sin(omega2 * t + phase2)
+            return torch.stack([x, y], dim=-1)
+
+        raise ValueError(
+            f"unknown signal_type={signal_type!r} for input_dim={self.input_dim}"
+        )
 
 
 def get_irregular_sine_dataloaders(
     config: ODEConfig,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    """Builds train/val/test dataloaders for the synthetic sine benchmark."""
-    train_dataset = IrregularSineWaveDataset(
-        num_samples=config.train_size,
+    """Builds train/val/test dataloaders for the synthetic irregular benchmark.
+
+    Uses one dataset plus random_split so the split protocol matches Anna's
+    benchmark structure more closely.
+    """
+    full_dataset = IrregularSineWaveDataset(
+        num_samples=config.train_size + config.val_size + config.test_size,
         context_start=config.context_start,
         context_end=config.context_end,
         future_end=config.future_end,
@@ -185,31 +232,16 @@ def get_irregular_sine_dataloaders(
         min_observed_context_points=config.min_observed_context_points,
         observation_prob=config.observation_prob,
         noise_std=config.noise_std,
+        input_dim=config.input_dim,
+        signal_type=config.signal_type,
         seed=config.seed,
     )
-    val_dataset = IrregularSineWaveDataset(
-        num_samples=config.val_size,
-        context_start=config.context_start,
-        context_end=config.context_end,
-        future_end=config.future_end,
-        n_context_points=config.n_context_points,
-        n_future_points=config.n_future_points,
-        min_observed_context_points=config.min_observed_context_points,
-        observation_prob=config.observation_prob,
-        noise_std=config.noise_std,
-        seed=config.seed + 1,
-    )
-    test_dataset = IrregularSineWaveDataset(
-        num_samples=config.test_size,
-        context_start=config.context_start,
-        context_end=config.context_end,
-        future_end=config.future_end,
-        n_context_points=config.n_context_points,
-        n_future_points=config.n_future_points,
-        min_observed_context_points=config.min_observed_context_points,
-        observation_prob=config.observation_prob,
-        noise_std=config.noise_std,
-        seed=config.seed + 2,
+
+    split_generator = torch.Generator().manual_seed(config.seed)
+    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
+        full_dataset,
+        [config.train_size, config.val_size, config.test_size],
+        generator=split_generator,
     )
 
     train_loader = DataLoader(

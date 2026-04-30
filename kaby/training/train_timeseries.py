@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from email import parser
 import random
 from typing import Any
 import json
@@ -11,6 +12,7 @@ import numpy as np
 import torch
 import wandb
 
+import config
 from kaby.config import ODEConfig
 from kaby.data.timeseries import get_irregular_sine_dataloaders
 from kaby.models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
@@ -50,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     defaults = ODEConfig()
 
     parser = argparse.ArgumentParser(
-        description="Train ODE-RNN or GRU on irregular sine-wave data.",
+        description="Train ODE-RNN or GRU baselines on synthetic irregular time-series data.",
     )
     parser.add_argument(
         "--model_type",
@@ -72,7 +74,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--solver", type=str, default=defaults.solver_type)
     parser.add_argument("--atol", type=float, default=defaults.atol)
     parser.add_argument("--rtol", type=float, default=defaults.rtol)
+    parser.add_argument("--ode_hidden_dim", type=int, default=None)
+    parser.add_argument("--gru_time_hidden_dim", type=int, default=None)
+    parser.add_argument("--gru_notime_hidden_dim", type=int, default=None)
+    parser.add_argument("--input_dim", type=int, default=defaults.input_dim)
     
+    parser.add_argument(
+    "--signal_type",
+    type=str,
+    default=defaults.signal_type,
+    choices=["sine", "spiral", "damped"],
+    )
+
     parser.add_argument(
         "--train_loss_mode",
         type=str,
@@ -137,6 +150,13 @@ def build_config(args: argparse.Namespace) -> ODEConfig:
     config.atol = args.atol
     config.rtol = args.rtol
     config.train_loss_mode = args.train_loss_mode
+    config.ode_hidden_dim = args.ode_hidden_dim
+    config.gru_time_hidden_dim = args.gru_time_hidden_dim
+    config.gru_notime_hidden_dim = args.gru_notime_hidden_dim
+    config.input_dim = args.input_dim
+    config.signal_type = args.signal_type
+    config.in_features = args.input_dim
+    config.output_dim = args.input_dim
 
 
     config.context_start = args.context_start
@@ -158,10 +178,14 @@ def build_config(args: argparse.Namespace) -> ODEConfig:
 
 def build_model(config: ODEConfig) -> torch.nn.Module:
     """Initializes the requested time-series model."""
+    ode_hidden = config.ode_hidden_dim or config.hidden_dim
+    gru_time_hidden = config.gru_time_hidden_dim or config.hidden_dim
+    gru_notime_hidden = config.gru_notime_hidden_dim or config.hidden_dim
+
     if config.model_type == "ode_rnn":
         return ODERNN(
             input_dim=config.in_features,
-            hidden_dim=config.hidden_dim,
+            hidden_dim=ode_hidden,
             output_dim=config.output_dim,
             solver_type=config.solver_type,
             atol=config.atol,
@@ -172,7 +196,7 @@ def build_model(config: ODEConfig) -> torch.nn.Module:
     if config.model_type == "gru_time":
         return GRUTimeSeriesBaseline(
             input_dim=config.in_features,
-            hidden_dim=config.hidden_dim,
+            hidden_dim=gru_time_hidden,
             output_dim=config.output_dim,
             start_time=config.context_start,
         )
@@ -180,7 +204,7 @@ def build_model(config: ODEConfig) -> torch.nn.Module:
     if config.model_type == "gru_notime":
         return GRUNoTimeBaseline(
             input_dim=config.in_features,
-            hidden_dim=config.hidden_dim,
+            hidden_dim=gru_notime_hidden,
             output_dim=config.output_dim,
             start_time=config.context_start,
         )
@@ -202,13 +226,21 @@ def _json_safe(value: Any) -> Any:
 
 def build_default_run_name(config: ODEConfig) -> str:
     """Builds a compact run tag for local result files."""
+    effective_hidden = config.hidden_dim
+    if config.model_type == "ode_rnn" and config.ode_hidden_dim is not None:
+        effective_hidden = config.ode_hidden_dim
+    elif config.model_type == "gru_time" and config.gru_time_hidden_dim is not None:
+        effective_hidden = config.gru_time_hidden_dim
+    elif config.model_type == "gru_notime" and config.gru_notime_hidden_dim is not None:
+        effective_hidden = config.gru_notime_hidden_dim
+
     return (
         f"{config.model_type}"
         f"_loss-{config.train_loss_mode}"
         f"_seed-{config.seed}"
         f"_ctx-{config.n_context_points}"
         f"_fut-{config.n_future_points}"
-        f"_hid-{config.hidden_dim}"
+        f"_hid-{effective_hidden}"
     )
 
 
@@ -280,6 +312,8 @@ def main() -> None:
                 "val_extrapolation_mse": val_metrics["extrapolation_mse"],
                 "val_forward_nfe_per_sample": val_metrics["nfe_per_sample"],
                 "best_val_interpolation_mse": best_val_interp,
+                "train_forward_nfe_per_batch": train_metrics["nfe_per_batch"],
+                "val_forward_nfe_per_batch": val_metrics["nfe_per_batch"],
             }
         )
         
@@ -300,6 +334,8 @@ def main() -> None:
                 "val_extrapolation_mse": float(val_metrics["extrapolation_mse"]),
                 "val_forward_nfe_per_sample": float(val_metrics["nfe_per_sample"]),
                 "best_val_interpolation_mse": float(best_val_interp),
+                "train_forward_nfe_per_batch": float(train_metrics["nfe_per_batch"]),
+                "val_forward_nfe_per_batch": float(val_metrics["nfe_per_batch"]),
             }
         )
 
@@ -309,7 +345,8 @@ def main() -> None:
             f"val_loss={val_metrics['loss']:.6f} | "
             f"val_interp={val_metrics['interpolation_mse']:.6f} | "
             f"val_extra={val_metrics['extrapolation_mse']:.6f} | "
-            f"nfe/sample={train_metrics['nfe_per_sample']:.3f}"
+            f"nfe/sample={train_metrics['nfe_per_sample']:.3f} | "
+            f"nfe/batch={train_metrics['nfe_per_batch']:.3f}"
         )
 
     model.load_state_dict(best_state_dict)
@@ -328,6 +365,7 @@ def main() -> None:
             "test_interpolation_mse": test_metrics["interpolation_mse"],
             "test_extrapolation_mse": test_metrics["extrapolation_mse"],
             "test_forward_nfe_per_sample": test_metrics["nfe_per_sample"],
+            "test_forward_nfe_per_batch": test_metrics["nfe_per_batch"],
         }
     )
 
