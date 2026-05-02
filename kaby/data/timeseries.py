@@ -10,11 +10,7 @@ from kaby.config import ODEConfig
 
 
 class IrregularSineWaveDataset(Dataset):
-    """Synthetic irregular time-series dataset with Anna-style batch fields.
-
-    Supports multiple signal families through `signal_type`, while keeping the
-    same batch contract used by the Kaby time-series models.
-    """
+    """Synthetic irregular time-series dataset with batch fields."""
 
     def __init__(
         self,
@@ -66,12 +62,7 @@ class IrregularSineWaveDataset(Dataset):
         self,
         generator: torch.Generator,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Samples strictly increasing context/future times.
-
-        To be a bit closer to Anna's benchmark style:
-        - the first context time is anchored at context_start
-        - the last future time is anchored at future_end
-        """
+        """Samples strictly increasing context/future times."""
         eps = 1e-4
 
         n_context_inner = self.n_context_points - 1
@@ -116,7 +107,6 @@ class IrregularSineWaveDataset(Dataset):
                 if observed_count >= self.min_observed_context_points:
                     break
 
-        # Ensure at least one missing point remains in the context interval.
         if int((~mask).sum().item()) == 0 and self.n_context_points > 1:
             mask[-1] = False
 
@@ -217,11 +207,7 @@ class IrregularSineWaveDataset(Dataset):
 def get_irregular_sine_dataloaders(
     config: ODEConfig,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    """Builds train/val/test dataloaders for the synthetic irregular benchmark.
-
-    Uses one dataset plus random_split so the split protocol matches Anna's
-    benchmark structure more closely.
-    """
+    """Builds train/val/test dataloaders for the synthetic irregular benchmark"""
     full_dataset = IrregularSineWaveDataset(
         num_samples=config.train_size + config.val_size + config.test_size,
         context_start=config.context_start,

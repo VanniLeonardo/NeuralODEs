@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class ODEConfig:
-    """Configuration for Kaby's standalone ODE-RNN time-series experiments."""
+    """Configuration for standalone ODE-RNN time-series experiments."""
 
     # ODE solver parameters
     solver_type: str = "dopri5"

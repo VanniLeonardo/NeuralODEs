@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-from email import parser
 import random
 from typing import Any
 import json
@@ -12,7 +11,7 @@ import numpy as np
 import torch
 import wandb
 
-import config
+
 from kaby.config import ODEConfig
 from kaby.data.timeseries import get_irregular_sine_dataloaders
 from kaby.models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
@@ -20,8 +19,8 @@ from kaby.training.timeseries_engine import evaluate_timeseries, train_timeserie
 
 try:
     from rich.console import Console
-except ImportError:  # pragma: no cover
-    class Console:  # type: ignore[override]
+except ImportError:  
+    class Console: 
         def print(self, *args: Any, **kwargs: Any) -> None:
             print(*args)
 

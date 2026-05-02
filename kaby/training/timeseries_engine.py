@@ -49,7 +49,7 @@ def compute_context_training_metrics(
     context_predictions: torch.Tensor,
     batch: BatchDict,
 ) -> Dict[str, torch.Tensor]:
-    """Metrics for Anna-aligned training: query context only, optimize observed context only."""
+    """Metrics fortraining: query context only, optimize observed context only."""
     batch_size, context_steps, output_dim = context_predictions.shape
 
     if batch["context_values"].shape != (batch_size, context_steps, output_dim):

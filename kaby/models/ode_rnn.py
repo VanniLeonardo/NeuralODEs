@@ -7,7 +7,7 @@ import torch.nn as nn
 from torchdiffeq import odeint_adjoint as odeint
 
 class ODEFunc(nn.Module):
-    """Local copy of the shared repo ODEFunc for Kaby's standalone ODE-RNN."""
+    """Local copy of the shared repo ODEFunc, to avoid dependency issues."""
 
     def __init__(self, in_features: int, hidden_dim: int) -> None:
         super().__init__()

@@ -31,11 +31,11 @@ def _build_batch(batch_size: int = 3) -> dict[str, torch.Tensor]:
 def _build_manual_metric_batch() -> dict[str, torch.Tensor]:
     """Tiny hand-crafted batch for exact metric checks."""
     return {
-        "observed_context": torch.tensor([[[10.0], [0.0]]]),   # not used by metric fns directly
-        "context_values": torch.tensor([[[10.0], [20.0]]]),    # noisy context targets
+        "observed_context": torch.tensor([[[10.0], [0.0]]]),   
+        "context_values": torch.tensor([[[10.0], [20.0]]]),    
         "context_times": torch.tensor([[0.0, 1.0]]),
-        "context_mask": torch.tensor([[[1.0], [0.0]]]),        # first observed, second hidden
-        "interp_mask": torch.tensor([[[0.0], [1.0]]]),         # second point is interpolation target
+        "context_mask": torch.tensor([[[1.0], [0.0]]]),        
+        "interp_mask": torch.tensor([[[0.0], [1.0]]]),        
         "full_times": torch.tensor([[0.0, 1.0, 2.0]]),
         "ground_truth": torch.tensor([[[100.0], [200.0], [300.0]]]),
         "future_mask": torch.tensor([[[1.0]]]),
@@ -244,16 +244,12 @@ def test_compute_timeseries_metrics_matches_manual_values() -> None:
 
     metrics = compute_timeseries_metrics(predictions, batch)
 
-    # observed_mse: only first context point is observed -> (1 - 10)^2 = 81
     assert torch.isclose(metrics["observed_mse"], torch.tensor(81.0))
 
-    # interpolation_mse: only second context point is hidden -> (2 - 200)^2 = 39204
     assert torch.isclose(metrics["interpolation_mse"], torch.tensor(39204.0))
 
-    # extrapolation_mse: only future point -> (3 - 300)^2 = 88209
     assert torch.isclose(metrics["extrapolation_mse"], torch.tensor(88209.0))
 
-    # full loss against ground_truth over all three points
     expected_full = torch.tensor(((1 - 100) ** 2 + (2 - 200) ** 2 + (3 - 300) ** 2) / 3.0)
     assert torch.isclose(metrics["loss"], expected_full)
 
@@ -264,11 +260,9 @@ def test_compute_context_training_metrics_matches_manual_values() -> None:
 
     metrics = compute_context_training_metrics(context_predictions, batch)
 
-    # training loss in observed_context mode should equal observed_mse
     assert torch.isclose(metrics["loss"], torch.tensor(81.0))
     assert torch.isclose(metrics["observed_mse"], torch.tensor(81.0))
 
-    # interpolation metric still checks hidden context points against clean GT
     assert torch.isclose(metrics["interpolation_mse"], torch.tensor(39204.0))
 
 
