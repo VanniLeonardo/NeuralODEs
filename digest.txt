@@ -4,20 +4,25 @@ Directory structure:
     ├── config.py
     ├── environment.yml
     ├── main.py
+    ├── solver_ablation.py
+    ├── sweep_discrete.yaml
     ├── sweep_mnist.yaml
+    ├── sweep_mnist_cnn.yaml
     ├── data/
     │   ├── __init__.py
     │   ├── dataloaders.py
     │   └── synthetic.py
     ├── models/
-    │   ├──  base.py
     │   ├── __init__.py
+    │   ├── base.py
     │   ├── continuous.py
     │   ├── discrete.py
     │   └── networks.py
     ├── scripts/
     │   ├── plot_fig3.py
+    │   ├── run_continuous_mnist.slurm
     │   ├── run_discrete_mnist.slurm
+    │   ├── run_sweep_discrete.slurm
     │   ├── test_continuous_mnist.py
     │   ├── test_discrete_mnist.py
     │   ├── train_continuous_mnist.py
@@ -81,6 +86,7 @@ project_root/
 â”œâ”€â”€ training/
 â”‚   â”œâ”€â”€ engine.py       # Raw PyTorch train/val step functions
 â”‚   â””â”€â”€ utils.py        # Checkpointing, NFE tracking
+â”œâ”€â”€ solver_ablation.py  # NFE and accuracy sweep over solvers and tolerances
 â””â”€â”€ notebooks/          # .ipynb files for EDA and final plotting
 
 In case of a modification to the project architecture or scope, update this file.
@@ -94,23 +100,49 @@ from typing import Tuple
 
 
 @dataclass
+class SolverAblationConfig:
+    """Configuration for the solver ablation study."""
+
+    # Sweep parameters
+    fixed_solvers: Tuple[str, ...] = ("euler", "midpoint", "rk4")
+    adaptive_solvers: Tuple[str, ...] = ("bosh3", "dopri5", "dopri8")
+    tolerances: Tuple[float, ...] = (1e-1, 1e-2, 1e-3, 1e-4)  # atol == rtol
+
+    # Shared training settings (mirrors scalar fields of ODEConfig)
+    dataset: str = "circles"
+    n_samples: int = 1000
+    val_split: float = 0.2
+    noise: float = 0.05
+    hidden_dim: int = 32
+    batch_size: int = 64
+    lr: float = 1e-3
+    epochs: int = 50
+
+
+@dataclass
 class ODEConfig:
     """Central configuration for Neural ODE experiments."""
-    
+
+    # Data Parameters
+    dataset: str = "circles"     # one of: circles, spirals, moons
+    n_samples: int = 1000
+    val_split: float = 0.2
+    noise: float = 0.05
+
     # ODE Solver Parameters
     solver_type: str = "dopri5"  # dopri5 is Runge-Kutta 4(5)
     atol: float = 1e-3
     rtol: float = 1e-3
     integration_time: Tuple[float, float] = (0.0, 1.0)
-    
+
     # Network Architecture
-    in_features: int = 2         # e.g., 2 for 2D synthetic datasets
+    in_features: int = 2         # fixed at 2 for all synthetic 2D datasets
     hidden_dim: int = 32
-    
+
     # Member 3 (ANODE) & Member 5 (Time-Series) overrides
     augment_dim: int = 0         # Number of zero-dimensions to append
     is_time_series: bool = False # Flag for ODE-RNN logic
-    
+
     # Training Parameters
     batch_size: int = 64
     lr: float = 1e-3
@@ -157,70 +189,321 @@ dependencies:
 ================================================
 FILE: main.py
 ================================================
+import argparse
 import torch
 import torch.nn as nn
 import wandb
+from rich.console import Console
+
+from config import ODEConfig
+from data.dataloaders import get_dataloaders
 from models.networks import ODENet
 from training.engine import train_epoch
-from config import ODEConfig
-from data.synthetic import get_concentric_circles
-from training.utils import visualize_2d_features, plot_ode_flows
+from training.utils import plot_ode_flows, visualize_2d_features
 
-def main():
-    # 1. Initialize Configuration
+console = Console()
+
+
+def get_gpu_memory_stats(device: torch.device) -> dict:
+    """Return GPU memory usage in MB. Empty dict when not on CUDA."""
+    if device.type != "cuda":
+        return {}
+
+    gpu_id = device.index if device.index is not None else torch.cuda.current_device()
+    return {
+        "gpu_mem_allocated_mb": torch.cuda.memory_allocated(gpu_id) / (1024**2),
+        "gpu_mem_reserved_mb": torch.cuda.memory_reserved(gpu_id) / (1024**2),
+        "gpu_mem_peak_allocated_mb": torch.cuda.max_memory_allocated(gpu_id)
+        / (1024**2),
+    }
+
+
+def main() -> None:
+    """Entry point: loads config, initializes wandb, runs the training loop."""
+
+    # 1. Initialize Configuration and parse overrides
     config = ODEConfig()
+    config.hidden_dim = 2  # Force hidden_dim to 2 for vizualization of failure modes
+    config.epochs = 300
+    parser = argparse.ArgumentParser(description="Neural ODE training")
+    for field, value in config.__dict__.items():
+        parser.add_argument(f"--{field}", type=type(value), default=value)
+    args = parser.parse_args()
+    for field in config.__dict__:
+        setattr(config, field, getattr(args, field))
 
-    config.hidden_dim = 2  # FORCE the ODE to stay in 2D to match the concentric circles dataset as in Chen et al. section 5.3
-    
     # 2. Initialize Weights & Biases
     wandb.init(project="neural-odes-30562", config=config.__dict__)
-    
+
     # 3. Hardware setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running on device: {device}")
+    console.log(f"Running on device: [bold]{device}[/bold]")
 
-    # 4. Initialize Model
+    # 4. Load Data
+    train_loader, val_loader = get_dataloaders(
+        dataset=config.dataset,
+        n_samples=config.n_samples,
+        batch_size=config.batch_size,
+        val_split=config.val_split,
+        noise=config.noise,
+    )
+
+    # 5. Initialize Model
     model = ODENet(
         data_dim=config.in_features,
         hidden_dim=config.hidden_dim,
         num_classes=2,
-        solver_type=config.solver_type
+        solver_type=config.solver_type,
+        atol=config.atol,
+        rtol=config.rtol,
     ).to(device)
-    
+
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     criterion = nn.CrossEntropyLoss()
 
-    # 5. Load synthetic dataset
-    dataloader = get_concentric_circles(
-        batch_size=config.batch_size,
-        n_samples=1000
-    )
-
     # 6. Training Loop
     for epoch in range(config.epochs):
-        train_metrics = train_epoch(model, dataloader, optimizer, criterion, device)
-        
-        # Log to WandB
-        wandb.log({
-            "epoch": epoch,
-            "train_loss": train_metrics["loss"],
-            "train_accuracy": train_metrics["accuracy"],
-            "forward_nfe": train_metrics["nfe"]
-        })
-        
+        if device.type == "cuda":
+            gpu_id = (
+                device.index
+                if device.index is not None
+                else torch.cuda.current_device()
+            )
+            torch.cuda.reset_peak_memory_stats(gpu_id)
+
+        train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
+        gpu_mem = get_gpu_memory_stats(device)
+
+        wandb.log({"epoch": epoch, **train_metrics, **gpu_mem})
+
         if config.hidden_dim == 2 and epoch % 10 == 0:
-            visualize_2d_features(model, dataloader, device, epoch)
-        
-        if epoch % 5 == 0:
-            print(f"Epoch {epoch} | Loss: {train_metrics['loss']:.4f} | NFE: {train_metrics['nfe']:.1f}")
+            visualize_2d_features(model, train_loader, device, epoch)
 
         if epoch % 20 == 0:
-            plot_ode_flows(model, dataloader, device, epoch)
+            plot_ode_flows(model, train_loader, device, epoch)
+
+        if epoch % 5 == 0:
+            msg = (
+                f"Epoch {epoch:>3} | "
+                f"Loss: {train_metrics['loss']:.4f} | "
+                f"Acc: {train_metrics['accuracy']:.3f} | "
+                f"Fwd NFE: {train_metrics.get('forward_nfe_mean', 0):.1f} | "
+                f"Bwd NFE: {train_metrics.get('backward_nfe_mean', 0):.1f}"
+            )
+
+            if gpu_mem:
+                msg += (
+                    f" | GPU Alloc: {gpu_mem['gpu_mem_allocated_mb']:.1f} MB"
+                    f" | GPU Reserved: {gpu_mem['gpu_mem_reserved_mb']:.1f} MB"
+                    f" | GPU Peak: {gpu_mem['gpu_mem_peak_allocated_mb']:.1f} MB"
+                )
+
+            console.log(msg)
 
     wandb.finish()
 
+
 if __name__ == "__main__":
     main()
+
+
+
+================================================
+FILE: solver_ablation.py
+================================================
+import argparse
+import time
+import torch
+import torch.nn as nn
+import wandb
+from dataclasses import fields
+from rich.console import Console
+from typing import List, Tuple
+
+from config import ODEConfig, SolverAblationConfig
+from data.dataloaders import get_dataloaders
+from models.networks import ODENet
+from training.engine import eval_epoch, train_epoch
+
+console = Console()
+
+
+def _build_run_configs(
+    cfg: SolverAblationConfig,
+) -> List[Tuple[str, float, float]]:
+    r"""Generates the full sweep matrix as (solver, atol, rtol) tuples.
+
+    Fixed-step solvers are not tolerance-controlled; (0.0, 0.0) is used as a
+    sentinel. Adaptive solvers are crossed with the tolerance grid using
+    $\text{atol} = \text{rtol}$, which is standard practice.
+
+    Args:
+        cfg (SolverAblationConfig): The ablation configuration.
+    """
+    runs: List[Tuple[str, float, float]] = [
+        (s, 0.0, 0.0) for s in cfg.fixed_solvers
+    ]
+    for s in cfg.adaptive_solvers:
+        for tol in cfg.tolerances:
+            runs.append((s, tol, tol))
+    return runs
+
+
+def _run_single(
+    solver: str,
+    atol: float,
+    rtol: float,
+    cfg: SolverAblationConfig,
+    train_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    device: torch.device,
+) -> None:
+    """Trains and evaluates one (solver, tolerance) configuration.
+
+    Args:
+        solver (str): torchdiffeq solver name (e.g. 'dopri5', 'rk4').
+        atol (float): Absolute tolerance; 0.0 for fixed-step solvers (ignored).
+        rtol (float): Relative tolerance; 0.0 for fixed-step solvers (ignored).
+        cfg (SolverAblationConfig): Shared training configuration.
+        train_loader (torch.utils.data.DataLoader): Pre-built training loader.
+        val_loader (torch.utils.data.DataLoader): Pre-built validation loader.
+        device (torch.device): Target compute device.
+    """
+    is_adaptive = solver not in set(cfg.fixed_solvers)
+    run_name = f"solver={solver}_tol={atol:.0e}" if is_adaptive else f"solver={solver}"
+
+    wandb.init(
+        project="neural-odes-30562",
+        name=run_name,
+        config={
+            "solver": solver,
+            "atol": atol,
+            "rtol": rtol,
+            "is_adaptive": is_adaptive,
+            "dataset": cfg.dataset,
+            "epochs": cfg.epochs,
+            "hidden_dim": cfg.hidden_dim,
+        },
+        reinit=True,
+    )
+
+    # Fixed-step solvers ignore atol/rtol; pass ODEConfig defaults as safe values
+    effective_atol = atol if is_adaptive else ODEConfig.atol
+    effective_rtol = rtol if is_adaptive else ODEConfig.rtol
+
+    model = ODENet(
+        data_dim=2,
+        hidden_dim=cfg.hidden_dim,
+        num_classes=2,
+        solver_type=solver,
+        atol=effective_atol,
+        rtol=effective_rtol,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+    criterion = nn.CrossEntropyLoss()
+
+    for epoch in range(cfg.epochs):
+        t0 = time.perf_counter()
+        train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
+        epoch_time = time.perf_counter() - t0
+
+        val_metrics = eval_epoch(model, val_loader, criterion, device)
+
+        wandb.log({
+            "epoch": epoch,
+            "epoch_time_s": epoch_time,
+            **{f"train_{k}": v for k, v in train_metrics.items()},
+            **{f"val_{k}": v for k, v in val_metrics.items()},
+        })
+
+        if epoch % 5 == 0:
+            console.log(
+                f"[bold]{run_name}[/bold] | Epoch {epoch:>3} | "
+                f"Loss: {train_metrics['loss']:.4f} | "
+                f"Val Acc: {val_metrics['accuracy']:.3f} | "
+                f"Fwd NFE: {train_metrics.get('forward_nfe_mean', 0):.1f} | "
+                f"Time: {epoch_time:.2f}s"
+            )
+
+    wandb.finish()
+
+
+def main() -> None:
+    """Entry point for the solver ablation sweep."""
+
+    # 1. Initialize Configuration and parse overrides for scalar fields
+    config = SolverAblationConfig()
+    parser = argparse.ArgumentParser(description="Neural ODE solver ablation")
+    for f in fields(config):
+        val = getattr(config, f.name)
+        if isinstance(val, (str, int, float, bool)):
+            parser.add_argument(f"--{f.name}", type=type(val), default=val)
+    args = parser.parse_args()
+    for f in fields(config):
+        if hasattr(args, f.name):
+            setattr(config, f.name, getattr(args, f.name))
+
+    # 2. Hardware setup
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    console.log(f"Running on device: [bold]{device}[/bold]")
+
+    # 3. Build sweep matrix and generate data once (all runs share dataset/seed)
+    run_configs = _build_run_configs(config)
+    train_loader, val_loader = get_dataloaders(
+        dataset=config.dataset,
+        n_samples=config.n_samples,
+        batch_size=config.batch_size,
+        val_split=config.val_split,
+        noise=config.noise,
+    )
+    console.log(f"Starting ablation: [bold]{len(run_configs)} runs[/bold]")
+
+    # 4. Execute each run sequentially
+    for solver, atol, rtol in run_configs:
+        _run_single(solver, atol, rtol, config, train_loader, val_loader, device)
+
+    console.log("[bold green]Ablation complete.[/bold green]")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+================================================
+FILE: sweep_discrete.yaml
+================================================
+program: scripts.train_discrete_mnist
+
+command:
+  - ${env}
+  - python
+  - "-m"
+  - ${program}
+  - "--use_wandb_sweep"
+
+method: random
+
+metric:
+  name: best_test_accuracy
+  goal: maximize
+
+parameters:
+  lr:
+    values: [0.001, 0.0005]
+
+  hidden_dim:
+    values: [96, 128, 160]
+
+  num_layers:
+    values: [5, 7, 9]
+
+  batch_size:
+    values: [64]
+
+  epochs:
+    values: [10]
 
 
 ================================================
@@ -259,6 +542,41 @@ parameters:
 
 
 ================================================
+FILE: sweep_mnist_cnn.yaml
+================================================
+program: scripts.train_continuous_mnist
+command:
+  - ${env}
+  - python
+  - "-m"
+  - ${program}
+method: bayes
+metric:
+  name: test_accuracy
+  goal: maximize
+parameters:
+  network_type:
+    value: "cnn"
+  lr:
+    min: 0.0005
+    max: 0.005
+  hidden_dim:
+    values:
+      - 32
+      - 64
+      - 128
+  batch_size:
+    values:
+      - 64
+      - 128
+      - 256
+  solver:
+    values:
+      - "dopri5"
+      - "rk4"
+
+
+================================================
 FILE: data/__init__.py
 ================================================
 [Empty file]
@@ -267,98 +585,243 @@ FILE: data/__init__.py
 ================================================
 FILE: data/dataloaders.py
 ================================================
-from torch.utils.data import DataLoader
+import torch
+from torch.utils.data import DataLoader, TensorDataset, random_split
 from torchvision import datasets, transforms
+from typing import Tuple
+
+from data.synthetic import make_circles, make_moons, make_spirals
 
 
-def flatten_tensor(x):
+def flatten_tensor(x: torch.Tensor) -> torch.Tensor:
     return x.view(-1)
 
 
-def get_mnist_dataloaders(batch_size: int, data_root: str = "./data", flatten: bool = True):
-    """
-    Returns train and test dataloaders for MNIST.
+def get_mnist_dataloaders(
+    batch_size: int,
+    data_root: str = "./data",
+    flatten: bool = True,
+) -> Tuple[DataLoader, DataLoader]:
+    """Returns train and test DataLoaders for MNIST.
 
-    IMPORTANT:
-    Images are flattened from [1, 28, 28] to [784] if flatten=True
-    because the model uses linear layers (MLP).
+    Args:
+        batch_size (int): Batch size for both loaders.
+        data_root (str): Directory where MNIST is downloaded.
+        flatten (bool): If True, flattens images from [1, 28, 28] to [784].
     """
-
     transform_list = [transforms.ToTensor()]
     if flatten:
         transform_list.append(transforms.Lambda(flatten_tensor))
-    
     transform = transforms.Compose(transform_list)
 
     train_dataset = datasets.MNIST(
-        root=data_root,
-        train=True,
-        download=True,
-        transform=transform
+        root=data_root, train=True, download=True, transform=transform
     )
-
     test_dataset = datasets.MNIST(
-        root=data_root,
-        train=False,
-        download=True,
-        transform=transform
+        root=data_root, train=False, download=True, transform=transform
     )
 
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=0
     )
-
     test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=0
     )
 
     return train_loader, test_loader
 
 
+_DATASET_REGISTRY = {
+    "circles": make_circles,
+    "spirals": make_spirals,
+    "moons": make_moons,
+}
+
+
+def get_dataloaders(
+    dataset: str = "circles",
+    n_samples: int = 1000,
+    batch_size: int = 64,
+    val_split: float = 0.2,
+    noise: float = 0.05,
+    seed: int = 42,
+) -> Tuple[DataLoader, DataLoader]:
+    """Builds train and validation DataLoaders for a synthetic 2D dataset.
+
+    Args:
+        dataset (str): One of 'circles', 'spirals', 'moons'.
+        n_samples (int): Total dataset size before splitting.
+        batch_size (int): Batch size for both loaders.
+        val_split (float): Fraction of data reserved for validation.
+        noise (float): Noise level forwarded to the generator function.
+        seed (int): Controls both data generation and the train/val split.
+    """
+    if dataset not in _DATASET_REGISTRY:
+        raise ValueError(
+            f"Unknown dataset '{dataset}'. Choose from {list(_DATASET_REGISTRY)}."
+        )
+
+    X, y = _DATASET_REGISTRY[dataset](n_samples=n_samples, noise=noise, seed=seed)
+    full_dataset = TensorDataset(X, y)
+
+    n_val = int(len(full_dataset) * val_split)
+    n_train = len(full_dataset) - n_val
+
+    # seeded generator so split is reproducible independently of data generation
+    generator = torch.Generator().manual_seed(seed)
+    train_ds, val_ds = random_split(full_dataset, [n_train, n_val], generator=generator)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader
+
+
+
 ================================================
 FILE: data/synthetic.py
 ================================================
+import numpy as np
 import torch
-from torch.utils.data import TensorDataset, DataLoader
-from sklearn.datasets import make_circles
+from sklearn.datasets import make_circles as sklearn_make_circles
+from torch.utils.data import DataLoader, TensorDataset
+from typing import Tuple
 
 
-def get_1d_crossing_data(batch_size: int):
+def get_1d_crossing_data(batch_size: int) -> DataLoader:
+    """Returns a 1D crossing dataset for sanity-checking trajectory crossings."""
     x = torch.tensor([[-1.0], [1.0]], dtype=torch.float32)
     y = torch.tensor([[1.0], [-1.0]], dtype=torch.float32)
-
-    dataset = TensorDataset(x, y)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    return loader
+    return DataLoader(TensorDataset(x, y), batch_size=batch_size, shuffle=True)
 
 
-def get_concentric_circles(batch_size: int, n_samples: int = 1024, noise: float = 0.05):
-    x, y = make_circles(n_samples=n_samples, noise=noise, factor=0.5)
+# get_concentric_circles uses sklearn, returns a DataLoader â€” used by main.py.
+# make_circles uses numpy with a fixed seed, returns raw tensors -- used by
+# get_dataloaders for reproducible train/val splits across the solver ablation.
+def get_concentric_circles(
+    batch_size: int,
+    n_samples: int = 1024,
+    noise: float = 0.05,
+) -> DataLoader:
+    """Returns a DataLoader of concentric circles via sklearn.
 
+    Args:
+        batch_size (int): Batch size for the loader.
+        n_samples (int): Total number of points.
+        noise (float): Std of Gaussian noise added to coordinates.
+    """
+    x, y = sklearn_make_circles(n_samples=n_samples, noise=noise, factor=0.5)
     x = torch.tensor(x, dtype=torch.float32)
     y = torch.tensor(y, dtype=torch.long)
+    return DataLoader(TensorDataset(x, y), batch_size=batch_size, shuffle=True)
 
-    dataset = TensorDataset(x, y)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    return loader
+def make_circles(
+    n_samples: int = 1000,
+    noise: float = 0.05,
+    factor: float = 0.5,
+    seed: int = 42,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    r"""Generates two concentric circles for binary classification.
+
+    Points are sampled uniformly on $[0, 2\pi)$; the inner circle is scaled
+    by `factor`. Standard toy benchmark from Chen et al. (2018).
+
+    Args:
+        n_samples (int): Total number of points across both classes.
+        noise (float): Std of Gaussian noise added to $(x, y)$ coordinates.
+        factor (float): Inner circle radius as fraction of outer ($r_{\text{inner}}$).
+        seed (int): Random seed for reproducibility.
+    """
+    rng = np.random.default_rng(seed)
+    n_outer = n_samples // 2
+    n_inner = n_samples - n_outer
+
+    # Sample angles uniformly on $[0, 2\pi)$
+    theta_outer = rng.uniform(0, 2 * np.pi, n_outer)
+    theta_inner = rng.uniform(0, 2 * np.pi, n_inner)
+
+    outer = np.stack([np.cos(theta_outer), np.sin(theta_outer)], axis=1)
+    inner = np.stack([np.cos(theta_inner), np.sin(theta_inner)], axis=1) * factor
+
+    X = np.concatenate([outer, inner], axis=0) + rng.normal(0, noise, (n_samples, 2))
+    y = np.concatenate([np.zeros(n_outer), np.ones(n_inner)]).astype(np.int64)
+
+    return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.long)
+
+
+def make_spirals(
+    n_samples: int = 1000,
+    noise: float = 0.1,
+    seed: int = 42,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    r"""Generates two interleaving Archimedean spirals for binary classification.
+
+    Radial coordinate $r = \theta / (4\pi)$ with $\theta \in [0, 4\pi]$.
+    Class 1 is rotated by $\pi$ relative to class 0.
+
+    Args:
+        n_samples (int): Total number of points across both classes.
+        noise (float): Std of Gaussian noise added to $(x, y)$ coordinates.
+        seed (int): Random seed for reproducibility.
+    """
+    rng = np.random.default_rng(seed)
+    n_per_class = n_samples // 2
+
+    # $r = \theta / (4\pi)$, so $r \in [0, 1]$ as $\theta$ spans $[0, 4\pi]$
+    theta = np.linspace(0, 4 * np.pi, n_per_class)
+    r = theta / (4 * np.pi)
+
+    x0 = np.stack([r * np.cos(theta), r * np.sin(theta)], axis=1)
+    x1 = np.stack([r * np.cos(theta + np.pi), r * np.sin(theta + np.pi)], axis=1)
+
+    X = np.concatenate([x0, x1], axis=0) + rng.normal(0, noise, (n_samples, 2))
+    y = np.concatenate([np.zeros(n_per_class), np.ones(n_per_class)]).astype(np.int64)
+
+    return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.long)
+
+
+def make_moons(
+    n_samples: int = 1000,
+    noise: float = 0.1,
+    seed: int = 42,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    r"""Generates two interleaving crescent moons for binary classification.
+
+    Upper moon spans $\theta \in [0, \pi]$; lower moon is offset by $(1, -0.5)$.
+
+    Args:
+        n_samples (int): Total number of points across both classes.
+        noise (float): Std of Gaussian noise added to $(x, y)$ coordinates.
+        seed (int): Random seed for reproducibility.
+    """
+    rng = np.random.default_rng(seed)
+    n_upper = n_samples // 2
+    n_lower = n_samples - n_upper
+
+    # Upper moon: $\theta \in [0, \pi]$
+    theta_upper = np.linspace(0, np.pi, n_upper)
+    upper = np.stack([np.cos(theta_upper), np.sin(theta_upper)], axis=1)
+
+    # Lower moon offset by $(1, -0.5)$
+    theta_lower = np.linspace(0, np.pi, n_lower)
+    lower = np.stack([1 - np.cos(theta_lower), -np.sin(theta_lower) - 0.5], axis=1)
+
+    X = np.concatenate([upper, lower], axis=0) + rng.normal(0, noise, (n_samples, 2))
+    y = np.concatenate([np.zeros(n_upper), np.ones(n_lower)]).astype(np.int64)
+
+    return torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.long)
+
 
 
 ================================================
-FILE: models/ base.py
+FILE: models/__init__.py
 ================================================
 [Empty file]
 
 
 ================================================
-FILE: models/__init__.py
+FILE: models/base.py
 ================================================
 [Empty file]
 
@@ -486,31 +949,46 @@ FILE: models/networks.py
 ================================================
 import torch
 import torch.nn as nn
-from models.continuous import ODEFunc, ODEBlock
+from models.continuous import ODEFunc, ODEBlock, ConvODEFunc
 
 
 class ODENet(nn.Module):
     """Full continuous-depth model for classification tasks.
-    
+
     Args:
         data_dim (int): Dimensionality of the input data (e.g., 2 for circles).
         hidden_dim (int): Dimensionality of the ODE hidden state.
         num_classes (int): Number of output classes (e.g., 2 for binary classification).
         solver_type (str): The ODE solver to use.
+        atol (float): Absolute error tolerance forwarded to ODEBlock.
+        rtol (float): Relative error tolerance forwarded to ODEBlock.
     """
-    def __init__(self, data_dim: int, hidden_dim: int, num_classes: int, solver_type: str = "dopri5"):
+    def __init__(
+        self,
+        data_dim: int,
+        hidden_dim: int,
+        num_classes: int,
+        solver_type: str = "dopri5",
+        atol: float = 1e-3,
+        rtol: float = 1e-3,
+    ):
         super().__init__()
-        
+
         # 1. Map input data into the hidden ODE space
         self.downsampling = nn.Sequential(
             nn.Linear(data_dim, hidden_dim),
             nn.Tanh()
         )
-        
-        # 2. The continuous continuous block
+
+        # 2. The continuous dynamics block
         self.ode_func = ODEFunc(in_features=hidden_dim, hidden_dim=hidden_dim)
-        self.ode_block = ODEBlock(ode_func=self.ode_func, solver_type=solver_type)
-        
+        self.ode_block = ODEBlock(
+            ode_func=self.ode_func,
+            solver_type=solver_type,
+            atol=atol,
+            rtol=rtol,
+        )
+
         # 3. Map the terminal ODE state to class logits
         self.fc = nn.Linear(hidden_dim, num_classes)
 
@@ -521,6 +999,39 @@ class ODENet(nn.Module):
         
         if return_trajectory:
             return h_T  # We don't pass the full trajectory to the classifier
+            
+        return self.fc(h_T)
+    
+class ConvODENet(nn.Module):
+    """Continuous-depth model for images using Convolutional layers."""
+    def __init__(self, in_channels: int, num_filters: int, num_classes: int, solver_type: str = "dopri5"):
+        super().__init__()
+        
+        # 1. Map input image (e.g. 1 channel) to feature maps without flattening
+        self.downsampling = nn.Sequential(
+            nn.Conv2d(in_channels, num_filters, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_filters),
+            nn.ReLU(inplace=True)
+        )
+        
+        # 2. The continuous block using the Convolutional Vector Field
+        self.ode_func = ConvODEFunc(num_channels=num_filters)
+        self.ode_block = ODEBlock(ode_func=self.ode_func, solver_type=solver_type)
+        
+        # 3. Global average pooling to flatten the spatial dimensions, then classify
+        self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(num_filters, num_classes)
+        )
+
+    def forward(self, x: torch.Tensor, return_trajectory: bool = False) -> torch.Tensor:
+        self.ode_func.nfe = 0
+        h = self.downsampling(x)
+        h_T = self.ode_block(h, return_trajectory=return_trajectory)
+        
+        if return_trajectory:
+            return h_T  
             
         return self.fc(h_T)
 
@@ -662,6 +1173,32 @@ def plot_figure_3(results, epoch):
 
 
 ================================================
+FILE: scripts/run_continuous_mnist.slurm
+================================================
+#!/bin/bash
+#SBATCH --job-name=ode_mnist
+#SBATCH --account=3263572
+#SBATCH --partition=stud
+#SBATCH --qos=stud
+#SBATCH --cpus-per-task=2
+#SBATCH --gpus=1
+#SBATCH --time=60
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+
+module load /software/modules/miniconda3
+eval "$(conda shell.bash hook)"
+conda activate neural_odes
+
+cd /home/3263572/NeuralODEs
+
+python -m scripts.train_continuous_mnist
+
+conda deactivate
+module unload /software/modules/miniconda3
+
+
+================================================
 FILE: scripts/run_discrete_mnist.slurm
 ================================================
 #!/bin/bash
@@ -682,6 +1219,32 @@ conda activate neural_odes
 cd ~/NeuralODEs
 
 python -m scripts.train_discrete_mnist
+
+conda deactivate
+module unload /software/modules/miniconda3
+
+
+================================================
+FILE: scripts/run_sweep_discrete.slurm
+================================================
+#!/bin/bash
+#SBATCH --job-name=sweep_disc
+#SBATCH --account=3263572
+#SBATCH --partition=stud
+#SBATCH --qos=stud
+#SBATCH --cpus-per-task=2
+#SBATCH --gpus=1
+#SBATCH --time=120
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+
+module load /software/modules/miniconda3
+eval "$(conda shell.bash hook)"
+conda activate neural_odes
+
+cd /home/3263572/NeuralODEs
+
+wandb agent gaiagrossi-bocconi-university/NeuralODEs/cedblosn
 
 conda deactivate
 module unload /software/modules/miniconda3
@@ -754,10 +1317,12 @@ FILE: scripts/train_continuous_mnist.py
 import torch
 import torch.nn as nn
 import wandb
+import argparse
 
 from data.dataloaders import get_mnist_dataloaders
-from models.networks import ODENet
+from models.networks import ODENet, ConvODENet
 from training.engine import train_epoch
+from scripts.plot_fig3 import evaluate_tolerances, plot_figure_3
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -779,17 +1344,35 @@ def evaluate(model, dataloader, criterion, device):
 
     return {"loss": total_loss / total_samples, "accuracy": correct / total_samples}
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--hidden_dim", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--solver", type=str, default="dopri5")
+    parser.add_argument("--network_type", type=str, default="cnn", choices=["mlp", "cnn"])
+    return parser.parse_args()
+
 def main():
-    batch_size = 64
-    hidden_dim = 128
-    lr = 1e-3
-    epochs = 10
-    solver_type = "dopri5"
+    args = parse_args()
+    
+    batch_size = args.batch_size
+    hidden_dim = args.hidden_dim
+    lr = args.lr
+    epochs = args.epochs
+    solver_type = args.solver
+    network_type = args.network_type
+    # Select architecture based on network_type:
+    # - "mlp": fair comparison with DiscreteResNet (same input representation)
+    # - "cnn": image-based architecture, closer to the original Neural ODE paper setup
 
     wandb.init(
+        mode="offline",
         project="neural-odes-30562",
         config={
             "model": "ODENet",
+            "network_type": network_type,
             "dataset": "MNIST",
             "batch_size": batch_size,
             "hidden_dim": hidden_dim,
@@ -798,25 +1381,27 @@ def main():
             "solver": solver_type
         },
     )
-    # Get parameters from wandb.config (allows sweep to override defaults)
+    # Uncomment the following lines if running a WandB Sweep.
+    # In that case, hyperparameters are automatically provided by WandB instead of CLI arguments. 
     batch_size = wandb.config.batch_size
     hidden_dim = wandb.config.hidden_dim
     lr = wandb.config.lr
     epochs = wandb.config.epochs
     solver_type = wandb.config.solver
+    network_type = wandb.config.network_type
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running on device: {device}")
+    print(f"Running on device: {device} | Network: {network_type.upper()}")
 
-    train_loader, test_loader = get_mnist_dataloaders(batch_size=batch_size)
+    # Determine if we should flatten the image based on network type
+    flatten_img = (network_type == "mlp")
+    train_loader, test_loader = get_mnist_dataloaders(batch_size=batch_size, flatten=flatten_img)
 
-    # 100% matched to the ResNet parameters
-    model = ODENet(
-        data_dim=784,
-        hidden_dim=hidden_dim,
-        num_classes=10,
-        solver_type=solver_type
-    ).to(device)
+    # Initialize the correct architecture
+    if network_type == "mlp":
+        model = ODENet(data_dim=784, hidden_dim=hidden_dim, num_classes=10, solver_type=solver_type).to(device)
+    else:
+        model = ConvODENet(in_channels=1, num_filters=hidden_dim, num_classes=10, solver_type=solver_type).to(device)
 
     n_params = count_parameters(model)
     print(f"Trainable parameters: {n_params}")
@@ -842,9 +1427,25 @@ def main():
         print(
             f"Epoch {epoch} | "
             f"train_acc: {train_metrics['accuracy']:.4f} | "
+            f"test_acc: {test_metrics['accuracy']:.4f} | "
             f"NFE: {train_metrics['nfe']:.1f} | "
             f"Mem: {train_metrics['memory_mb']:.1f} MB"
         )
+
+    # ==========================================================
+    # POST-TRAINING: GENERATE FIGURE 3 TOLERANCE PLOTS
+    # ==========================================================
+    print("Evaluating solver tolerances to generate Figure 3...")
+    # Grab a single batch from the test loader
+    x_val, y_val = next(iter(test_loader))
+    x_val, y_val = x_val.to(device), y_val.to(device)
+    
+    # Run the rigorous mathematical evaluation
+    results = evaluate_tolerances(model, x_val, y_val)
+    
+    # Plot and upload to WandB!
+    plot_figure_3(results, epoch=epochs)
+    print("Figure 3 generated and uploaded to WandB!")
 
     wandb.finish()
 
@@ -855,6 +1456,7 @@ if __name__ == "__main__":
 ================================================
 FILE: scripts/train_discrete_mnist.py
 ================================================
+import argparse
 import torch
 import torch.nn as nn
 import wandb
@@ -891,26 +1493,63 @@ def evaluate(model, dataloader, criterion, device):
     return {"loss": avg_loss, "accuracy": accuracy}
 
 
-def main():
-    batch_size = 64
-    hidden_dim = 128
-    num_layers = 5
-    lr = 1e-3
-    epochs = 10
-
-    wandb.init(
-        mode="offline",
-        project="neural-odes-30562",
-        config={
-            "model": "DiscreteResNet",
-            "dataset": "MNIST",
-            "batch_size": batch_size,
-            "hidden_dim": hidden_dim,
-            "num_layers": num_layers,
-            "lr": lr,
-            "epochs": epochs,
-        },
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--hidden_dim", type=int, default=128)
+    parser.add_argument("--num_layers", type=int, default=7)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument(
+        "--use_wandb_sweep",
+        action="store_true",
+        help="Enable WandB sweep mode (online, config pulled from wandb.config).",
     )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    # Defaults from CLI / manual runs
+    batch_size = args.batch_size
+    hidden_dim = args.hidden_dim
+    num_layers = args.num_layers
+    lr = args.lr
+    epochs = args.epochs
+
+    default_config = {
+        "model": "DiscreteResNet",
+        "dataset": "MNIST",
+        "batch_size": batch_size,
+        "hidden_dim": hidden_dim,
+        "num_layers": num_layers,
+        "lr": lr,
+        "epochs": epochs,
+    }
+
+    # WandB init:
+    # - offline for normal/manual runs
+    # - online for sweep runs
+    if args.use_wandb_sweep:
+        wandb.init(
+            project="neural-odes-30562",
+            config=default_config,
+        )
+
+        # Override defaults with sweep values
+        batch_size = wandb.config.batch_size
+        hidden_dim = wandb.config.hidden_dim
+        num_layers = wandb.config.num_layers
+        lr = wandb.config.lr
+        epochs = wandb.config.epochs
+
+    else:
+        wandb.init(
+            mode="offline",
+            project="neural-odes-30562",
+            config=default_config,
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {device}")
@@ -930,9 +1569,13 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
 
+    best_test_acc = 0.0
+
     for epoch in range(epochs):
         train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
         test_metrics = evaluate(model, test_loader, criterion, device)
+
+        best_test_acc = max(best_test_acc, test_metrics["accuracy"])
 
         wandb.log({
             "epoch": epoch,
@@ -940,16 +1583,21 @@ def main():
             "train_accuracy": train_metrics["accuracy"],
             "test_loss": test_metrics["loss"],
             "test_accuracy": test_metrics["accuracy"],
+            "best_test_accuracy": best_test_acc,
             "num_parameters": n_params,
+            "memory_mb": train_metrics["memory_mb"],
         })
 
-        print(
-            f"Epoch {epoch} | "
-            f"train_loss: {train_metrics['loss']:.4f} | "
-            f"train_acc: {train_metrics['accuracy']:.4f} | "
-            f"test_loss: {test_metrics['loss']:.4f} | "
-            f"test_acc: {test_metrics['accuracy']:.4f}"
-        )
+        if epoch % 5 == 0:
+            print(
+                f"Epoch {epoch} | "
+                f"train_loss: {train_metrics['loss']:.4f} | "
+                f"train_acc: {train_metrics['accuracy']:.4f} | "
+                f"test_loss: {test_metrics['loss']:.4f} | "
+                f"test_acc: {test_metrics['accuracy']:.4f} | "
+                f"best_test_acc: {best_test_acc:.4f} | "
+                f"memory_mb: {train_metrics['memory_mb']:.1f}"
+            )
 
     wandb.finish()
 
@@ -1055,22 +1703,26 @@ FILE: training/engine.py
 ================================================
 import torch
 import torch.nn as nn
-from typing import Dict
+from typing import Dict, List
+
+from training.utils import NFEStats
+
 
 def train_epoch(
-    model: nn.Module, 
-    dataloader: torch.utils.data.DataLoader, 
-    optimizer: torch.optim.Optimizer, 
-    criterion: nn.Module, 
-    device: torch.device
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
+    device: torch.device,
 ) -> Dict[str, float]:
+    """Trains the model for a single epoch."""
     model.train()
     total_loss = 0.0
-    total_nfe = 0
     correct = 0
     total_samples = 0
-    
-    # Reset memory stats at the start of the epoch
+    nfe_stats = NFEStats()
+    has_ode_func = hasattr(model, "ode_func")
+
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
@@ -1079,121 +1731,286 @@ def train_epoch(
 
         optimizer.zero_grad()
         logits = model(x)
+
+        # Read NFE immediately after forward pass, before adjoint solve
+        forward_nfe = model.ode_func.nfe if has_ode_func else 0
+
         loss = criterion(logits, y)
         loss.backward()
         optimizer.step()
+
+        # NFE_bwd = NFE_total - NFE_fwd
+        if has_ode_func:
+            nfe_stats.record(
+                forward=forward_nfe,
+                backward=model.ode_func.nfe - forward_nfe,
+            )
 
         total_loss += loss.item() * x.size(0)
         preds = torch.argmax(logits, dim=1)
         correct += (preds == y).sum().item()
         total_samples += x.size(0)
-        
-        if hasattr(model, 'ode_func'):
-            total_nfe += model.ode_func.nfe
 
-    avg_loss = total_loss / total_samples
-    accuracy = correct / total_samples
-    
-    # Calculate average NFE safely
-    avg_nfe = total_nfe / len(dataloader) if total_nfe > 0 else 0.0
-    
-    # Get peak memory in Megabytes
-    peak_memory_mb = 0.0
-    if device.type == "cuda":
-        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-
-    return {
-        "loss": avg_loss, 
-        "accuracy": accuracy, 
-        "nfe": avg_nfe,
-        "memory_mb": peak_memory_mb
+    metrics = {
+        "loss": total_loss / total_samples,
+        "accuracy": correct / total_samples,
     }
+    if device.type == "cuda":
+        metrics["memory_mb"] = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+    if nfe_stats:
+        metrics.update(nfe_stats.summary())
+
+    return metrics
+
+
+def eval_epoch(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    criterion: nn.Module,
+    device: torch.device,
+) -> Dict[str, float]:
+    """Evaluates the model for a single epoch without gradient computation."""
+    model.eval()
+    total_loss = 0.0
+    correct = 0
+    total_samples = 0
+    has_ode_func = hasattr(model, "ode_func")
+    fwd_nfe: List[int] = []
+
+    with torch.no_grad():
+        for x, y in dataloader:
+            x, y = x.to(device), y.to(device)
+            logits = model(x)
+
+            if has_ode_func:
+                fwd_nfe.append(model.ode_func.nfe)
+
+            loss = criterion(logits, y)
+            total_loss += loss.item() * x.size(0)
+            preds = torch.argmax(logits, dim=1)
+            correct += (preds == y).sum().item()
+            total_samples += x.size(0)
+
+    metrics = {
+        "loss": total_loss / total_samples,
+        "accuracy": correct / total_samples,
+    }
+    if fwd_nfe:
+        metrics["forward_nfe_mean"] = sum(fwd_nfe) / len(fwd_nfe)
+
+    return metrics
+
 
 
 ================================================
 FILE: training/utils.py
 ================================================
+import numpy as np
+import os
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import wandb
-import os
-from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  # registers 3D projection
+from typing import Any, Dict, List
 
-def visualize_2d_features(model: nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device, epoch: int):
-    """Passes 2D data through the ODE and plots the deformed feature space."""
+_PLOTS_DIR: str = "plots"
+
+
+def visualize_2d_features(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device,
+    epoch: int,
+) -> None:
+    """Passes 2D data through the ODE block and plots the deformed feature space.
+
+    Args:
+        model (nn.Module): Trained ODENet with hidden_dim == 2.
+        dataloader (torch.utils.data.DataLoader): Source of input batches.
+        device (torch.device): Device the model lives on.
+        epoch (int): Current epoch, used for plot title and filename.
+    """
     model.eval()
     all_features = []
-    all_labels =[]
+    all_labels = []
 
     with torch.no_grad():
         for x, y in dataloader:
             x = x.to(device)
-            # Pass data only up to the ODE block (skip the final fc layer)
             h = model.downsampling(x)
             h_T = model.ode_block(h)
-            
             all_features.append(h_T.cpu())
             all_labels.append(y.cpu())
 
     features = torch.cat(all_features, dim=0).numpy()
     labels = torch.cat(all_labels, dim=0).numpy()
 
-    # Create the plot
     plt.figure(figsize=(6, 6))
-    plt.scatter(features[labels==0, 0], features[labels==0, 1], color='red', alpha=0.5, label='Class 0')
-    plt.scatter(features[labels==1, 0], features[labels==1, 1], color='blue', alpha=0.5, label='Class 1')
+    plt.scatter(
+        features[labels == 0, 0], features[labels == 0, 1],
+        color="red", alpha=0.5, label="Class 0",
+    )
+    plt.scatter(
+        features[labels == 1, 0], features[labels == 1, 1],
+        color="blue", alpha=0.5, label="Class 1",
+    )
     plt.title(f"ODE Feature Space at Epoch {epoch}")
     plt.legend()
-    
-    # Save locally
-    os.makedirs("plots", exist_ok=True)
-    plot_path = f"plots/features_epoch_{epoch}.png"
+
+    os.makedirs(_PLOTS_DIR, exist_ok=True)
+    plot_path = f"{_PLOTS_DIR}/features_epoch_{epoch}.png"
     plt.savefig(plot_path)
-    
-    # Upload to WandB
     wandb.log({"feature_space": wandb.Image(plot_path)}, commit=False)
-    
     plt.close()
 
-def plot_ode_flows(model: nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device, epoch: int, is_anode: bool = False):
-    """Plots the continuous ODE trajectories for a batch of data."""
+
+def plot_ode_flows(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device,
+    epoch: int,
+    is_anode: bool = False,
+) -> None:
+    """Plots the continuous ODE trajectories for a batch of data.
+
+    Args:
+        model (nn.Module): Trained ODENet; forward must support return_trajectory=True.
+        dataloader (torch.utils.data.DataLoader): Source of one batch for plotting.
+        device (torch.device): Device the model lives on.
+        epoch (int): Current epoch, used for plot title and filename.
+        is_anode (bool): If True, renders trajectories in 3D (augmented dim).
+    """
     model.eval()
     x, y = next(iter(dataloader))
     x = x.to(device)
-    
+
     with torch.no_grad():
         # trajectories shape: (time_steps, batch_size, hidden_dim)
         trajectories = model(x, return_trajectory=True).cpu().numpy()
-        
+
     y = y.numpy()
-    
     fig = plt.figure(figsize=(8, 6))
-    
-    # If standard NODE (2D), plot 2D flows
+
     if not is_anode:
         ax = fig.add_subplot(111)
         for i in range(len(x)):
-            color = 'blue' if y[i] == 1 else 'red'
-            # Plot the line across time for this specific sample
-            ax.plot(trajectories[:, i, 0], trajectories[:, i, 1], color=color, alpha=0.3, linewidth=1)
-            # Add an arrow at the end
-            ax.arrow(trajectories[-2, i, 0], trajectories[-2, i, 1], 
-                     trajectories[-1, i, 0] - trajectories[-2, i, 0], 
-                     trajectories[-1, i, 1] - trajectories[-2, i, 1], 
-                     color=color, head_width=0.05, alpha=0.8)
-    
-    # If ANODE (3D), plot 3D flows (per Beppe)
+            color = "blue" if y[i] == 1 else "red"
+            ax.plot(
+                trajectories[:, i, 0], trajectories[:, i, 1],
+                color=color, alpha=0.3, linewidth=1,
+            )
+            ax.arrow(
+                trajectories[-2, i, 0], trajectories[-2, i, 1],
+                trajectories[-1, i, 0] - trajectories[-2, i, 0],
+                trajectories[-1, i, 1] - trajectories[-2, i, 1],
+                color=color, head_width=0.01, head_length=0.015, alpha=0.8,
+            )
     else:
-        ax = fig.add_subplot(111, projection='3d')
+        ax = fig.add_subplot(111, projection="3d")
         for i in range(len(x)):
-            color = 'blue' if y[i] == 1 else 'red'
-            ax.plot(trajectories[:, i, 0], trajectories[:, i, 1], trajectories[:, i, 2], color=color, alpha=0.3)
-            ax.scatter(trajectories[-1, i, 0], trajectories[-1, i, 1], trajectories[-1, i, 2], color=color, s=10)
-            
+            color = "blue" if y[i] == 1 else "red"
+            ax.plot(
+                trajectories[:, i, 0], trajectories[:, i, 1], trajectories[:, i, 2],
+                color=color, alpha=0.3,
+            )
+            ax.scatter(
+                trajectories[-1, i, 0], trajectories[-1, i, 1], trajectories[-1, i, 2],
+                color=color, s=10,
+            )
+
     plt.title(f"ODE Flow Trajectories at Epoch {epoch}")
-    plot_path = f"plots/flow_epoch_{epoch}.png"
+    os.makedirs(_PLOTS_DIR, exist_ok=True)
+    plot_path = f"{_PLOTS_DIR}/flow_epoch_{epoch}.png"
     plt.savefig(plot_path)
     wandb.log({"ode_flow": wandb.Image(plot_path)}, commit=False)
     plt.close()
+
+
+class NFEStats:
+    r"""Accumulates per-batch forward and backward NFE across an epoch.
+
+    The adjoint method solves a second ODE during backpropagation, so the
+    total cost per batch is:
+    $\text{NFE}_{\text{total}} = \text{NFE}_{\text{fwd}} + \text{NFE}_{\text{bwd}}$
+
+    Tracking them separately reveals the relative cost of inference vs. training
+    and how that ratio evolves as the vector field becomes smoother during training.
+    """
+
+    def __init__(self) -> None:
+        self._forward: List[int] = []
+        self._backward: List[int] = []
+
+    def __len__(self) -> int:
+        return len(self._forward)
+
+    def record(self, forward: int, backward: int) -> None:
+        """Appends NFE counts for a single batch.
+
+        Args:
+            forward (int): NFE during the forward ODE solve.
+            backward (int): NFE during the adjoint ODE solve.
+        """
+        self._forward.append(forward)
+        self._backward.append(backward)
+
+    def summary(self) -> Dict[str, float]:
+        """Mean and std of forward, backward, and total NFE across recorded batches."""
+        fwd = np.array(self._forward, dtype=float)
+        bwd = np.array(self._backward, dtype=float)
+        tot = fwd + bwd
+        return {
+            "forward_nfe_mean": float(fwd.mean()),
+            "forward_nfe_std": float(fwd.std()),
+            "backward_nfe_mean": float(bwd.mean()),
+            "backward_nfe_std": float(bwd.std()),
+            "total_nfe_mean": float(tot.mean()),
+        }
+
+
+def save_checkpoint(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    epoch: int,
+    config: Any,
+    path: str,
+) -> None:
+    """Saves model and optimizer state to disk.
+
+    Args:
+        model (nn.Module): The model to checkpoint.
+        optimizer (torch.optim.Optimizer): The optimizer to checkpoint.
+        epoch (int): Current epoch number, stored for resuming.
+        config (Any): Config object serialized alongside the weights.
+        path (str): Filepath to write the checkpoint.
+    """
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "config": config,
+        },
+        path,
+    )
+
+
+def load_checkpoint(
+    path: str,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+) -> int:
+    """Loads model and optimizer state from a checkpoint file.
+
+    Args:
+        path (str): Filepath of the checkpoint to load.
+        model (nn.Module): Model whose weights will be restored in-place.
+        optimizer (torch.optim.Optimizer): Optimizer whose state will be restored.
+    """
+    checkpoint = torch.load(path, map_location="cpu")
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    return int(checkpoint["epoch"])
+
 

@@ -30,10 +30,9 @@ def get_gpu_memory_stats(device: torch.device) -> dict:
 def main() -> None:
     """Entry point: loads config, initializes wandb, runs the training loop."""
 
-    # 1. Initialize Configuration and parse overrides
     config = ODEConfig()
     config.hidden_dim = 2  # Force hidden_dim to 2 for vizualization of failure modes
-    config.epochs = 300
+    config.epochs = 200
     parser = argparse.ArgumentParser(description="Neural ODE training")
     for field, value in config.__dict__.items():
         parser.add_argument(f"--{field}", type=type(value), default=value)
@@ -41,14 +40,11 @@ def main() -> None:
     for field in config.__dict__:
         setattr(config, field, getattr(args, field))
 
-    # 2. Initialize Weights & Biases
     wandb.init(project="neural-odes-30562", config=config.__dict__)
 
-    # 3. Hardware setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     console.log(f"Running on device: [bold]{device}[/bold]")
 
-    # 4. Load Data
     train_loader, val_loader = get_dataloaders(
         dataset=config.dataset,
         n_samples=config.n_samples,
@@ -57,7 +53,6 @@ def main() -> None:
         noise=config.noise,
     )
 
-    # 5. Initialize Model
     model = ODENet(
         data_dim=config.in_features,
         hidden_dim=config.hidden_dim,
@@ -70,7 +65,6 @@ def main() -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     criterion = nn.CrossEntropyLoss()
 
-    # 6. Training Loop
     for epoch in range(config.epochs):
         if device.type == "cuda":
             gpu_id = (

@@ -53,9 +53,6 @@ def main():
     epochs = args.epochs
     solver_type = args.solver
     network_type = args.network_type
-    # Select architecture based on network_type:
-    # - "mlp": fair comparison with DiscreteResNet (same input representation)
-    # - "cnn": image-based architecture, closer to the original Neural ODE paper setup
 
     wandb.init(
         mode="offline",
@@ -71,8 +68,7 @@ def main():
             "solver": solver_type,
         },
     )
-    # Uncomment the following lines if running a WandB Sweep.
-    # In that case, hyperparameters are automatically provided by WandB instead of CLI arguments.
+
     batch_size = wandb.config.batch_size
     hidden_dim = wandb.config.hidden_dim
     lr = wandb.config.lr
@@ -89,7 +85,6 @@ def main():
         batch_size=batch_size, flatten=flatten_img
     )
 
-    # Initialize the correct architecture
     if network_type == "mlp":
         model = ODENet(
             data_dim=784, hidden_dim=hidden_dim, num_classes=10, solver_type=solver_type
@@ -137,14 +132,12 @@ def main():
     # POST-TRAINING: GENERATE FIGURE 3 TOLERANCE PLOTS
     # ==========================================================
     print("Evaluating solver tolerances to generate Figure 3...")
-    # Grab a single batch from the test loader
+
     x_val, y_val = next(iter(test_loader))
     x_val, y_val = x_val.to(device), y_val.to(device)
 
-    # Run the rigorous mathematical evaluation
     results = evaluate_tolerances(model, x_val, y_val)
 
-    # Plot and upload to WandB!
     plot_figure_3(results, epoch=epochs)
     print("Figure 3 generated and uploaded to WandB!")
 

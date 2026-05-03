@@ -4,10 +4,8 @@ from models.networks import ODENet
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Get data
 train_loader, _ = get_mnist_dataloaders(batch_size=64)
 
-# Initialize model
 model = ODENet(
     data_dim=784,
     hidden_dim=128,
