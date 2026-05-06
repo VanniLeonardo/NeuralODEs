@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-RESULTS_DIR = BASE_DIR / "kaby" / "results"
-FIGURES_DIR = BASE_DIR / "kaby" / "figures"
+RESULTS_DIR = BASE_DIR / "results"
+FIGURES_DIR = BASE_DIR / "figures"
 
 MODELS = [
     {
