@@ -12,10 +12,10 @@ import torch
 import wandb
 
 
-from kaby.config import ODEConfig
-from kaby.data.timeseries import get_irregular_sine_dataloaders
-from kaby.models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
-from kaby.training.timeseries_engine import evaluate_timeseries, train_timeseries_epoch
+from config import ODEConfig
+from data.timeseries import get_irregular_sine_dataloaders
+from models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
+from training.timeseries_engine import evaluate_timeseries, train_timeseries_epoch
 
 try:
     from rich.console import Console
@@ -371,7 +371,7 @@ def main() -> None:
     console.rule("Final Test Metrics")
     console.print(test_metrics)
 
-    results_dir = Path("kaby/results")
+    results_dir = Path("results")
     results_dir.mkdir(parents=True, exist_ok=True)
 
     run_tag = args.run_name if args.run_name is not None else build_default_run_name(config)

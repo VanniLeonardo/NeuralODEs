@@ -6,7 +6,7 @@ from typing import Dict, Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from kaby.config import ODEConfig
+from config import ODEConfig
 
 
 class IrregularSineWaveDataset(Dataset):

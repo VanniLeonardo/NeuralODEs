@@ -3,14 +3,14 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from kaby.training.timeseries_engine import (
+from training.timeseries_engine import (
     compute_context_training_metrics,
     compute_timeseries_metrics,
     evaluate_timeseries,
     train_timeseries_epoch,
 )
-from kaby.data.timeseries import IrregularSineWaveDataset
-from kaby.models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
+from data.timeseries import IrregularSineWaveDataset
+from models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
 
 def _build_batch(batch_size: int = 3) -> dict[str, torch.Tensor]:
     dataset = IrregularSineWaveDataset(
