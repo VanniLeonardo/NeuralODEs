@@ -1,15 +1,14 @@
+from __future__ import annotations
+
 import numpy as np
 import torch
 from sklearn.datasets import make_circles as sklearn_make_circles
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Dataset
 from typing import Tuple
-from __future__ import annotations
 from dataclasses import dataclass
 from email import generator
 from typing import Dict
-import torch
 from torch import Tensor
-from torch.utils.data import Dataset
 from config import LatentODEConfig
 
 

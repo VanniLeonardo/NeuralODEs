@@ -4,10 +4,7 @@ from torchdiffeq import odeint_adjoint as odeint
 from __future__ import annotations
 from logging import config
 from typing import Dict, Optional, Tuple
-import torch
-import torch.nn as nn
 from torch import Tensor
-from torchdiffeq import odeint
 from config import LatentODEConfig
 
 
