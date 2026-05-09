@@ -58,6 +58,7 @@ def main() -> None:
         hidden_dim=config.hidden_dim,
         num_classes=2,
         solver_type=config.solver_type,
+        augment_dim=config.augment_dim,
         atol=config.atol,
         rtol=config.rtol,
     ).to(device)
@@ -83,7 +84,9 @@ def main() -> None:
             visualize_2d_features(model, train_loader, device, epoch)
 
         if epoch % 20 == 0:
-            plot_ode_flows(model, train_loader, device, epoch)
+            plot_ode_flows(
+                model, train_loader, device, epoch, is_anode=config.augment_dim > 0
+            )
 
         if epoch % 5 == 0:
             msg = (
