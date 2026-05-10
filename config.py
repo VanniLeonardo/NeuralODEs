@@ -35,6 +35,7 @@ class ANODECirclesConfig:
     rtol: float = 1e-3
 
     hidden_dim: int = 2
+    ode_hidden_dim: int = 64
     augment_dims: Tuple[int, ...] = (0, 1, 2, 5)
 
     seeds: Tuple[int, ...] = (0, 1, 2)

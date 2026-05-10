@@ -144,6 +144,7 @@ def _run_single(
         atol=cfg.atol,
         rtol=cfg.rtol,
         augment_dim=augment_dim,
+        ode_hidden_dim=cfg.ode_hidden_dim,
     ).to(device)
 
     num_parameters = _count_parameters(model)
@@ -156,6 +157,7 @@ def _run_single(
         config={
             **asdict(cfg),
             "augment_dim": augment_dim,
+            "ode_hidden_dim": cfg.ode_hidden_dim,
             "seed": seed,
             "model_name": model_name,
             "num_parameters": num_parameters,

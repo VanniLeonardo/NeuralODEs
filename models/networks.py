@@ -24,6 +24,7 @@ class ODENet(nn.Module):
         atol: float = 1e-3,
         rtol: float = 1e-3,
         augment_dim: int = 0,
+        ode_hidden_dim: int | None = None,
     ) -> None:
         """Full continuous-depth model for classification tasks with optional augmentation.
 
@@ -35,25 +36,24 @@ class ODENet(nn.Module):
             atol (float): Absolute error tolerance forwarded to ODEBlock.
             rtol (float): Relative error tolerance forwarded to ODEBlock.
             augment_dim (int): Number of augmentation dimensions for ANODE. 0 for standard NODE.
+            ode_hidden_dim (Optional[int]): Width of the ODEFunc MLP. Defaults to hidden_dim for backward compatibility.
         """
         super().__init__()
 
         self.augment_dim: int = augment_dim
         self.ode_dim: int = hidden_dim + augment_dim
 
-        # 1. Map input data into the hidden ODE space
-        self.downsampling = nn.Sequential(nn.Linear(data_dim, hidden_dim), nn.Tanh())
+        # ODEFunc MLP width. Defaults to hidden_dim for backward compatibility.
+        vf_hidden_dim: int = hidden_dim if ode_hidden_dim is None else ode_hidden_dim
 
-        # 2. The continuous dynamics block
-        self.ode_func = ODEFunc(in_features=self.ode_dim, hidden_dim=hidden_dim)
+        self.downsampling = nn.Sequential(nn.Linear(data_dim, hidden_dim), nn.Tanh())
+        self.ode_func = ODEFunc(in_features=self.ode_dim, hidden_dim=vf_hidden_dim)
         self.ode_block = ODEBlock(
             ode_func=self.ode_func,
             solver_type=solver_type,
             atol=atol,
             rtol=rtol,
         )
-
-        # 3. Map the terminal ODE state to class logits
         self.fc = nn.Linear(self.ode_dim, num_classes)
 
     def forward(self, x: torch.Tensor, return_trajectory: bool = False) -> torch.Tensor:

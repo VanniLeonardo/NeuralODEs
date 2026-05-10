@@ -113,3 +113,30 @@ def test_device_agnostic() -> None:
         pytest.fail("ODEBlock forward pass is not implemented.")
         
     assert out.device == device, "Output tensor fell back to CPU."
+
+
+def test_anode_odenet_with_ode_hidden_dim() -> None:
+    """Test ODENet with separate vector-field width under augmentation."""
+    batch_size = 4
+    data_dim = 2
+    num_classes = 2
+
+    model = ODENet(
+        data_dim=data_dim,
+        hidden_dim=2,
+        num_classes=num_classes,
+        augment_dim=2,
+        ode_hidden_dim=64,
+    )
+
+    x = torch.randn(batch_size, data_dim)
+    logits = model(x)
+
+    assert logits.shape == (batch_size, num_classes)
+
+    targets = torch.tensor([0, 1, 0, 1])
+    loss = nn.CrossEntropyLoss()(logits, targets)
+    loss.backward()
+
+    has_grads = any(param.grad is not None for param in model.parameters())
+    assert has_grads

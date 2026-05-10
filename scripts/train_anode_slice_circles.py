@@ -195,6 +195,7 @@ def _parse_args() -> SliceCirclesConfig:
     parser.add_argument("--atol", type=float, default=cfg.atol)
     parser.add_argument("--rtol", type=float, default=cfg.rtol)
     parser.add_argument("--hidden_dim", type=int, default=cfg.hidden_dim)
+    parser.add_argument("--ode_hidden_dim", type=int, default=cfg.ode_hidden_dim)
     parser.add_argument(
         "--augment_dims",
         type=_parse_int_tuple,
@@ -214,7 +215,10 @@ def _parse_args() -> SliceCirclesConfig:
     )
 
     args = parser.parse_args()
-    return SliceCirclesConfig(**vars(args))
+    for field in vars(cfg):
+        if hasattr(args, field):
+            setattr(cfg, field, getattr(args, field))
+    return cfg
 
 
 def _run_single(
@@ -242,6 +246,7 @@ def _run_single(
         atol=cfg.atol,
         rtol=cfg.rtol,
         augment_dim=augment_dim,
+        ode_hidden_dim=cfg.ode_hidden_dim,
     ).to(device)
 
     num_parameters = _count_parameters(model)
@@ -254,6 +259,7 @@ def _run_single(
         config={
             **asdict(cfg),
             "augment_dim": augment_dim,
+            "ode_hidden_dim": cfg.ode_hidden_dim,
             "seed": seed,
             "model_name": model_name,
             "num_parameters": num_parameters,
