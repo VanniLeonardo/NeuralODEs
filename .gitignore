@@ -218,3 +218,11 @@ wandb/
 
 digest.txt
 plots/
+# Experiment outputs
+results/
+figures/
+logs/
+*.tar.gz
+
+# macOS
+.DS_Store
