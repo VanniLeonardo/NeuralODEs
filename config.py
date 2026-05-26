@@ -1,5 +1,5 @@
-from typing import Tuple
 from __future__ import annotations
+from typing import Tuple
 import argparse
 from dataclasses import asdict, dataclass
 import torch
