@@ -235,3 +235,5 @@ logs/
 *.fls
 *.out
 *.synctex.gz
+
+latex/main.pdf
