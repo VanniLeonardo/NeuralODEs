@@ -7,7 +7,7 @@ command:
   - ${program}
   - "--use_wandb_sweep"
 
-method: random
+method: bayes
 
 metric:
   name: best_test_accuracy
@@ -24,7 +24,7 @@ parameters:
     values: [5, 7, 9]
 
   batch_size:
-    values: [64]
+    values: [64,128,256]
 
   epochs:
     values: [10]
