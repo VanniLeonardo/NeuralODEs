@@ -10,6 +10,24 @@ from typing import Any, Dict, List
 _PLOTS_DIR: str = "plots"
 
 
+def prepare_ode_hidden_state(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Prepare hidden state for ODE integration, handling ANODE augmentation if needed.
+
+    Args:
+        model (nn.Module): ODENet or ANODE model.
+        x (torch.Tensor): Input tensor of shape [batch_size, data_dim].
+
+    Returns:
+        torch.Tensor: Hidden state ready for ODEBlock.
+    """
+    h = model.downsampling(x)
+    augment_dim = getattr(model, "augment_dim", 0)
+    if augment_dim > 0:
+        zeros = torch.zeros(h.shape[0], augment_dim, device=h.device, dtype=h.dtype)
+        h = torch.cat([h, zeros], dim=1)
+    return h
+
+
 def visualize_2d_features(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
@@ -31,7 +49,7 @@ def visualize_2d_features(
     with torch.no_grad():
         for x, y in dataloader:
             x = x.to(device)
-            h = model.downsampling(x)
+            h = prepare_ode_hidden_state(model, x)
             h_T = model.ode_block(h)
             all_features.append(h_T.cpu())
             all_labels.append(y.cpu())
@@ -41,12 +59,18 @@ def visualize_2d_features(
 
     plt.figure(figsize=(6, 6))
     plt.scatter(
-        features[labels == 0, 0], features[labels == 0, 1],
-        color="red", alpha=0.5, label="Class 0",
+        features[labels == 0, 0],
+        features[labels == 0, 1],
+        color="red",
+        alpha=0.5,
+        label="Class 0",
     )
     plt.scatter(
-        features[labels == 1, 0], features[labels == 1, 1],
-        color="blue", alpha=0.5, label="Class 1",
+        features[labels == 1, 0],
+        features[labels == 1, 1],
+        color="blue",
+        alpha=0.5,
+        label="Class 1",
     )
     plt.title(f"ODE Feature Space at Epoch {epoch}")
     plt.legend()
@@ -90,26 +114,39 @@ def plot_ode_flows(
         for i in range(len(x)):
             color = "blue" if y[i] == 1 else "red"
             ax.plot(
-                trajectories[:, i, 0], trajectories[:, i, 1],
-                color=color, alpha=0.3, linewidth=1,
+                trajectories[:, i, 0],
+                trajectories[:, i, 1],
+                color=color,
+                alpha=0.3,
+                linewidth=1,
             )
             ax.arrow(
-                trajectories[-2, i, 0], trajectories[-2, i, 1],
+                trajectories[-2, i, 0],
+                trajectories[-2, i, 1],
                 trajectories[-1, i, 0] - trajectories[-2, i, 0],
                 trajectories[-1, i, 1] - trajectories[-2, i, 1],
-                color=color, head_width=0.01, head_length=0.015, alpha=0.8,
+                color=color,
+                head_width=0.01,
+                head_length=0.015,
+                alpha=0.8,
             )
     else:
         ax = fig.add_subplot(111, projection="3d")
         for i in range(len(x)):
             color = "blue" if y[i] == 1 else "red"
             ax.plot(
-                trajectories[:, i, 0], trajectories[:, i, 1], trajectories[:, i, 2],
-                color=color, alpha=0.3,
+                trajectories[:, i, 0],
+                trajectories[:, i, 1],
+                trajectories[:, i, 2],
+                color=color,
+                alpha=0.3,
             )
             ax.scatter(
-                trajectories[-1, i, 0], trajectories[-1, i, 1], trajectories[-1, i, 2],
-                color=color, s=10,
+                trajectories[-1, i, 0],
+                trajectories[-1, i, 1],
+                trajectories[-1, i, 2],
+                color=color,
+                s=10,
             )
 
     plt.title(f"ODE Flow Trajectories at Epoch {epoch}")
