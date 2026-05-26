@@ -682,11 +682,6 @@ def parse_integrated_args() -> argparse.Namespace:
         title="Latent ODE options, originally from main_latentODE.py",
     )
 
-    parser.add_argument("--latent-use-ode-rnn", type=str_to_bool, default=None)
-    parser.add_argument("--latent-is-variational", type=str_to_bool, default=None)
-    parser.add_argument("--latent-skip-validation", action="store_true")
-    parser.add_argument("--latent-encoder-type", type=str, default=None, choices=["odernn", "gru_time", "gru_notime"])
-
     return parser.parse_args()
 
 
