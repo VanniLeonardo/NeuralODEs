@@ -683,7 +683,6 @@ def parse_integrated_args() -> argparse.Namespace:
     )
 
     parser.add_argument("--latent-skip-validation", action="store_true")
-    parser.add_argument("--latent-encoder-type", type=str, default=None, choices=["odernn", "gru_time", "gru_notime"])
 
     return parser.parse_args()
 
