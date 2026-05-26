@@ -1,8 +1,0 @@
-runs/
-wandb/
-logs/
-tea_debug.log/
-results/intermediate results/
-check.py
-make_plots.py
-figures/figures pdf/

@@ -13,16 +13,12 @@ from torch import Tensor
 from torch.utils.data import DataLoader, random_split
 import json
 from pathlib import Path
-
-
 import time
 import torch
 import argparse
-
-
 try:
     import wandb
-except ImportError:  # pragma: no cover
+except ImportError:  
     class _WandbStub:
         def init(self, *args, **kwargs):
             return self
@@ -235,30 +231,25 @@ def evaluate_persistence(loader: DataLoader, config: LatentODEConfig) -> Dict[st
     context_len = config.seq_len // 2
 
     for batch in loader:
-        # Shapes: (B, T_full, 1) for values/ground_truth; (B, T_ctx, 1) for masks
-        observed = batch["observed_context"]       # noisy values, zero where masked
-        context_mask = batch["context_mask"]       # 1 if observed, 0 if masked
-        ground_truth = batch["ground_truth"]       # clean, full horizon
-        interp_mask = batch["interp_mask"]         # 1 only on masked context points
-        future_mask = batch["future_mask"]         # all ones on the future horizon
+        observed = batch["observed_context"]       
+        context_mask = batch["context_mask"]       
+        ground_truth = batch["ground_truth"]       
+        interp_mask = batch["interp_mask"]         
+        future_mask = batch["future_mask"]         
 
         B, T_ctx, D = observed.shape
         T_full = ground_truth.shape[1]
 
-        # Build carry-forward predictions on the context grid.
-        # For each (b, i), pred = most recent observed value at or before i.
-        # If nothing observed yet, pred = 0 (safe since t0 is always observed).
+
         pred_ctx = torch.zeros_like(observed)
         last_value = torch.zeros(B, D, device=observed.device, dtype=observed.dtype)
         for i in range(T_ctx):
-            is_obs = context_mask[:, i, :].bool()          # (B, D)
+            is_obs = context_mask[:, i, :].bool()          
             last_value = torch.where(is_obs, observed[:, i, :], last_value)
             pred_ctx[:, i, :] = last_value
 
-        # For the future horizon, just carry the final context value forward.
         pred_future = last_value.unsqueeze(1).expand(B, T_full - T_ctx, D)
 
-        # Interpolation: only evaluate on masked-out context points
         interp_sqerr = ((pred_ctx - ground_truth[:, :context_len, :]) ** 2) * interp_mask
         extrap_sqerr = ((pred_future - ground_truth[:, context_len:, :]) ** 2) * future_mask
 
@@ -330,7 +321,6 @@ def main() -> None:
         config.pin_memory = (device.type == "cuda")
     if args.encoder_type is not None:
         config.encoder_type = args.encoder_type
-        # Keep use_ode_rnn in sync for any legacy code paths that check it.
         config.use_ode_rnn = (args.encoder_type == "odernn")
  
 
@@ -515,7 +505,6 @@ def main() -> None:
         f"total_nfe={test_metrics['nfe']:.2f}"
     )
 
-    # Non-parametric persistence baseline on the same test set.
     persistence_metrics = evaluate_persistence(test_loader, config)
     console.log(
         f"persistence baseline | "

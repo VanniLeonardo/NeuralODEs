@@ -237,3 +237,5 @@ logs/
 *.synctex.gz
 
 latex/main.pdf
+
+anna/
