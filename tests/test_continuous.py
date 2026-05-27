@@ -56,11 +56,9 @@ def test_gradient_flow() -> None:
     loss = out.sum()
     loss.backward()
     
-    # Assert gradients flowed into the neural network weights
     has_grads = any(p.grad is not None for p in ode_func.parameters())
     assert has_grads, "Gradients did not flow to ODEFunc."
     
-    # Assert gradients flowed all the way back to the input tensor
     assert x.grad is not None, "Gradients did not flow back to the input tensor."
 
 

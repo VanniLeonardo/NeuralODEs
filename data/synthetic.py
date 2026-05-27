@@ -19,9 +19,6 @@ def get_1d_crossing_data(batch_size: int) -> DataLoader:
     return DataLoader(TensorDataset(x, y), batch_size=batch_size, shuffle=True)
 
 
-# get_concentric_circles uses sklearn, returns a DataLoader — used by main.py.
-# make_circles uses numpy with a fixed seed, returns raw tensors -- used by
-# get_dataloaders for reproducible train/val splits across the solver ablation.
 def get_concentric_circles(
     batch_size: int,
     n_samples: int = 1024,

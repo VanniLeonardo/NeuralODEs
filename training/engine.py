@@ -29,14 +29,12 @@ def train_epoch(
         optimizer.zero_grad()
         logits = model(x)
 
-        # Read NFE immediately after forward pass, before adjoint solve
         forward_nfe = model.ode_func.nfe if has_ode_func else 0
 
         loss = criterion(logits, y)
         loss.backward()
         optimizer.step()
 
-        # NFE_bwd = NFE_total - NFE_fwd
         if has_ode_func:
             nfe_stats.record(
                 forward=forward_nfe,

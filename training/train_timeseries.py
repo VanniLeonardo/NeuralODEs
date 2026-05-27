@@ -17,15 +17,7 @@ from data.timeseries import get_irregular_sine_dataloaders
 from models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
 from training.timeseries_engine import evaluate_timeseries, train_timeseries_epoch
 
-try:
-    from rich.console import Console
-except ImportError:  
-    class Console: 
-        def print(self, *args: Any, **kwargs: Any) -> None:
-            print(*args)
-
-        def rule(self, title: str) -> None:
-            print(title)
+from rich.console import Console
 
 
 def seed_everything(seed: int) -> None:

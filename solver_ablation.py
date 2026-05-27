@@ -119,7 +119,6 @@ def _run_single(
 def main() -> None:
     """Entry point for the solver ablation sweep."""
 
-    # 1. Initialize Configuration and parse overrides for scalar fields
     config = SolverAblationConfig()
     parser = argparse.ArgumentParser(description="Neural ODE solver ablation")
     for f in fields(config):
@@ -131,11 +130,9 @@ def main() -> None:
         if hasattr(args, f.name):
             setattr(config, f.name, getattr(args, f.name))
 
-    # 2. Hardware setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     console.log(f"Running on device: [bold]{device}[/bold]")
 
-    # 3. Build sweep matrix and generate data once (all runs share dataset/seed)
     run_configs = _build_run_configs(config)
     train_loader, val_loader = get_dataloaders(
         dataset=config.dataset,
@@ -146,7 +143,6 @@ def main() -> None:
     )
     console.log(f"Starting ablation: [bold]{len(run_configs)} runs[/bold]")
 
-    # 4. Execute each run sequentially
     for solver, atol, rtol in run_configs:
         _run_single(solver, atol, rtol, config, train_loader, val_loader, device)
 

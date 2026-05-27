@@ -1,7 +1,3 @@
-"""
-Generate publication figures for the Latent ODE write-up.
-Reads JSONs from results/ and writes PDFs/PNGs to figures/.
-"""
 import json
 from pathlib import Path
 
@@ -9,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-# ---- styling ----------------------------------------------------------------
 plt.rcParams.update({
     "font.size": 11,
     "font.family": "serif",
@@ -26,7 +21,6 @@ plt.rcParams.update({
     "axes.labelpad": 6,
 })
 
-# Vivid, colour-blind-friendly palette (Okabe-Ito-inspired)
 ENCODER_STYLE = {
     "gru_notime": {"label": "GRU (vanilla)",    "color": "#E69F00", "marker": "s"},
     "odernn":     {"label": "ODE-RNN",          "color": "#D55E00", "marker": "o"},
@@ -67,7 +61,7 @@ def load_persistence_baseline():
 
 
 # -----------------------------------------------------------------------------
-# FIGURE 1 (fixed): headline 3-way bar chart with sensible axes
+# FIGURE 1
 # -----------------------------------------------------------------------------
 def figure_1_bars():
     grouped = load_3way_results()
@@ -92,7 +86,6 @@ def figure_1_bars():
         bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors, alpha=0.92,
                       edgecolor="black", linewidth=0.8, width=0.65)
 
-        # Numeric labels on top of each bar
         for bar, m, s in zip(bars, means, stds):
             ax.text(bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + s + max(means) * 0.04,
@@ -104,13 +97,9 @@ def figure_1_bars():
         ax.set_ylabel("Test MSE")
         ax.set_title(metric_label, fontsize=12, fontweight="bold")
 
-        # CRUCIAL: set y-limit based on data, not on the persistence baseline
         ymax = max(m + s for m, s in zip(means, stds)) * 1.45
         ax.set_ylim(0, ymax)
 
-        # Persistence baseline as a dotted line that may sit far above the data,
-        # but with an arrow callout so the reader sees its scale without losing
-        # resolution on the bars.
         pers_key = "interp" if metric_key == "interpolation_mse" else "extrap"
         pers_val = persistence[pers_key]
         if pers_val < ymax:
@@ -118,7 +107,6 @@ def figure_1_bars():
                        label=f"Persistence: {pers_val:.3f}")
             ax.legend(loc="upper left", fontsize=9, frameon=False)
         else:
-            # off-scale persistence: annotate with an upward arrow at top of plot
             ax.annotate(f"Persistence baseline\n= {pers_val:.2f}  (off-scale ↑)",
                         xy=(len(encoders) - 1, ymax * 0.95),
                         xytext=(len(encoders) - 1, ymax * 0.72),
@@ -135,7 +123,7 @@ def figure_1_bars():
 
 
 # -----------------------------------------------------------------------------
-# FIGURE 2: colourful dataset showcase (1D sine + 2D spiral)
+# FIGURE 2
 # -----------------------------------------------------------------------------
 def figure_2_dataset_showcase():
     """
@@ -159,10 +147,8 @@ def figure_2_dataset_showcase():
     cfg_spiral.extrap_horizon = 10.0
     ds_spiral = TimeSeriesDataset(cfg_spiral)
 
-    # constrained_layout handles the colorbar without the tight_layout warning
     fig, axes = plt.subplots(2, 3, figsize=(12, 7), constrained_layout=True)
 
-    # ---- Top row: 1D sine ----
     sine_palette = ["#0072B2", "#D55E00", "#009E73"]
     for i, (ax, idx) in enumerate(zip(axes[0], [0, 17, 42])):
         s = ds_sine[idx]
@@ -192,7 +178,6 @@ def figure_2_dataset_showcase():
         ax.set_xlim(0, cfg_sine.extrap_horizon)
         ax.set_ylim(-1.4, 1.4)
 
-    # ---- Bottom row: 2D spiral ----
     cmap = plt.cm.viridis
     last_lc = None
     for i, (ax, idx) in enumerate(zip(axes[1], [0, 17, 42])):
@@ -248,7 +233,7 @@ def figure_2_dataset_showcase():
 
 
 # -----------------------------------------------------------------------------
-# FIGURE 3: encoder ranking summary — minimal text, colourful
+# FIGURE 3
 # -----------------------------------------------------------------------------
 def figure_3_ranking_summary():
     grouped = load_3way_results()
@@ -257,7 +242,6 @@ def figure_3_ranking_summary():
     metrics = ["interpolation_mse", "extrapolation_mse"]
     metric_labels = ["Interpolation", "Extrapolation"]
 
-    # gather means per encoder per metric
     fig, ax = plt.subplots(figsize=(7.5, 4))
 
     n_metrics = len(metrics)

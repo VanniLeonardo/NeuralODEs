@@ -10,7 +10,6 @@ import os
 def evaluate_tolerances(model, x, y):
     tolerances =[1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
     
-    # 1. Compute "Ground Truth" mathematically perfect state
     model.ode_block.atol = 1e-9
     model.ode_block.rtol = 1e-9
     with torch.no_grad():
@@ -18,12 +17,10 @@ def evaluate_tolerances(model, x, y):
 
     results =[]
 
-    # 2. Sweep over looser tolerances
     for tol in tolerances:
         model.ode_block.atol = tol
         model.ode_block.rtol = tol
         
-        # --- FORWARD PASS ---
         model.ode_func.nfe = 0
         start_time = time.time()
         
@@ -35,11 +32,9 @@ def evaluate_tolerances(model, x, y):
         forward_time = time.time() - start_time
         nfe_forward = model.ode_func.nfe
         
-        # Compute Numerical Error (MSE between perfect state and loose state)
         num_error = torch.mean((perfect_h_T - h_T)**2).item()
         
-        # --- BACKWARD PASS ---
-        model.ode_func.nfe = 0 # Reset to count backward steps!
+        model.ode_func.nfe = 0
         loss.backward()
         nfe_backward = model.ode_func.nfe
         
@@ -60,7 +55,6 @@ def plot_figure_3(results, epoch):
     times = [r["time"] for r in results]
     nfes_bw = [r["nfe_backward"] for r in results]
     
-    # Normalize times
     max_time = max(times)
     rel_times = [t / max_time for t in times]
     colors = nfes # Map color to NFE like the paper

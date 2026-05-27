@@ -71,7 +71,6 @@ class ODEBlock(nn.Module):
         """Solves the IVP. If return_trajectory is True, returns intermediate states."""
         
         if return_trajectory:
-            # Evaluate at 50 intermediate time steps between 0 and 1
             t = torch.linspace(0.0, 1.0, steps=50).type_as(x)
         else:
             t = self.integration_time.type_as(x)
