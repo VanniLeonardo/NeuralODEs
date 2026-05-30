@@ -18,9 +18,11 @@ cd /home/3263572/NeuralODEs
 export WANDB_MODE=offline
 
 python scripts/train_anode_circles.py \
-  --epochs 200 \
+  --epochs 500 \
   --n_samples 1000 \
   --batch_size 64 \
+  --lr 3e-3 \
+  --n_val_samples 3000 \
   --augment_dims 0,1,2,5 \
   --seeds 0,1,2 \
   --log_every 20 \
