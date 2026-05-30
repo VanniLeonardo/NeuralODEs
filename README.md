@@ -17,6 +17,7 @@ The final report should be read together with this repository. The code is organ
 
 ```text
 NeuralODEs/
+├── .gitignore
 ├── config.py                     # Dataclass configs for the main experiments
 ├── environment.yml               # Conda environment specification
 ├── main.py                       # Integrated Neural ODE + Latent ODE runner
@@ -42,9 +43,12 @@ NeuralODEs/
 │   ├── engine.py                 # Classification training/evaluation loops and NFE tracking
 │   ├── timeseries_engine.py      # Standalone time-series training/evaluation loops
 │   └── train_timeseries.py       # Standalone ODE-RNN/GRU time-series runner
-└── tests/
-    ├── test_continuous.py        # ODE block shape, NFE, and gradient tests
-    └── test_timeseries.py        # Time-series data/model tests
+├── tests/
+│   ├── test_continuous.py        # ODE block shape, NFE, and gradient tests
+│   └── test_timeseries.py        # Time-series data/model tests
+├── latex/                        # Full tex source code to reproduce the submission pdf
+└── references/                   
+
 ```
 
 ---
