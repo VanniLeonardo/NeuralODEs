@@ -17,6 +17,7 @@ dependencies:
   - numpy
   - scikit-learn
   - matplotlib
+  - pandas
   
   # DevTools, Linting, & Formatting
   - pytest
