@@ -22,10 +22,11 @@ python scripts/train_anode_circles.py \
   --n_samples 1000 \
   --batch_size 64 \
   --lr 3e-3 \
-  --n_val_samples 3000 \
   --augment_dims 0,1,2,5 \
   --seeds 0,1,2 \
-  --log_every 20 \
+  --hidden_dim 2 \
+  --ode_hidden_dim 64 \
+  --log_every 50 \
   --write_results
 
 conda deactivate
