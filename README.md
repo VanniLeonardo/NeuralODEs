@@ -46,7 +46,6 @@ NeuralODEs/
 ├── tests/
 │   ├── test_continuous.py        # ODE block shape, NFE, and gradient tests
 │   └── test_timeseries.py        # Time-series data/model tests
-├── latex/                        # Full tex source code to reproduce the submission pdf
 └── references/                   
 
 ```
