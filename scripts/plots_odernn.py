@@ -46,16 +46,18 @@ def history_curve(filename: str, metric_name: str) -> tuple[list[int], list[floa
 def make_interpolation_curve_plot() -> Path:
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    plt.rcParams.update({
-        "figure.facecolor": "white",
-        "axes.facecolor": "white",
-        "savefig.facecolor": "white",
-        "font.size": 9.5,
-        "axes.labelsize": 10.5,
-        "xtick.labelsize": 9.5,
-        "ytick.labelsize": 9.5,
-        "legend.fontsize": 9,
-    })
+    plt.rcParams.update(
+        {
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "savefig.facecolor": "white",
+            "font.size": 9.5,
+            "axes.labelsize": 10.5,
+            "xtick.labelsize": 9.5,
+            "ytick.labelsize": 9.5,
+            "legend.fontsize": 9,
+        }
+    )
 
     fig, ax = plt.subplots(figsize=(5.4, 3.3))
     fig.patch.set_facecolor("white")

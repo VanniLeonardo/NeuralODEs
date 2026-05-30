@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint_adjoint as odeint
 
+
 class ODEFunc(nn.Module):
     """Local copy of the shared repo ODEFunc, to avoid dependency issues."""
 
@@ -25,6 +26,7 @@ class ODEFunc(nn.Module):
         t_expanded = torch.ones_like(h[:, :1]) * t
         h_time = torch.cat([h, t_expanded], dim=1)
         return self.net(h_time)
+
 
 class ODERNN(nn.Module):
     """Standalone ODE-RNN for irregularly sampled time series.
@@ -104,9 +106,7 @@ class ODERNN(nn.Module):
                 "[batch, num_context_points, input_dim]."
             )
         if full_times.ndim != 2:
-            raise ValueError(
-                "full_times must have shape [batch, num_query_points]."
-            )
+            raise ValueError("full_times must have shape [batch, num_query_points].")
 
         context_mask = self._normalize_context_mask(context_mask)
 
@@ -121,9 +121,7 @@ class ODERNN(nn.Module):
                 "after mask normalization."
             )
         if full_times.size(1) < context_times.size(1):
-            raise ValueError(
-                "full_times must include all context_times as a prefix."
-            )
+            raise ValueError("full_times must include all context_times as a prefix.")
         if observed_context.size(-1) != self.input_dim:
             raise ValueError(
                 "observed_context last dimension does not match input_dim."
@@ -167,15 +165,11 @@ class ODERNN(nn.Module):
                 "context_times must be strictly increasing for every sample."
             )
         if not torch.all(full_times[1:] > full_times[:-1]):
-            raise ValueError(
-                "full_times must be strictly increasing for every sample."
-            )
+            raise ValueError("full_times must be strictly increasing for every sample.")
 
         num_context_points = context_times.size(0)
         if not torch.allclose(full_times[:num_context_points], context_times):
-            raise ValueError(
-                "full_times must start with the provided context_times."
-            )
+            raise ValueError("full_times must start with the provided context_times.")
 
         hidden = torch.zeros(
             1,
@@ -250,7 +244,7 @@ class ODERNN(nn.Module):
 
 class GRUTimeSeriesBaseline(nn.Module):
     """GRU baseline consuming value, mask, and absolute-time inputs."""
-    
+
     def __init__(
         self,
         input_dim: int,
@@ -305,9 +299,7 @@ class GRUTimeSeriesBaseline(nn.Module):
                 "[batch, num_context_points, input_dim]."
             )
         if full_times.ndim != 2:
-            raise ValueError(
-                "full_times must have shape [batch, num_query_points]."
-            )
+            raise ValueError("full_times must have shape [batch, num_query_points].")
 
         context_mask = self._normalize_context_mask(context_mask)
 
@@ -336,7 +328,7 @@ class GRUTimeSeriesBaseline(nn.Module):
         mask_value = observation.new_tensor([float(is_observed.item())])
         time_value = current_time.reshape(1).to(dtype=observation.dtype)
         return torch.cat([observation, mask_value, time_value], dim=0).unsqueeze(0)
-    
+
     def _forward_single(
         self,
         context_times: torch.Tensor,
@@ -350,15 +342,11 @@ class GRUTimeSeriesBaseline(nn.Module):
                 "context_times must be strictly increasing for every sample."
             )
         if not torch.all(full_times[1:] > full_times[:-1]):
-            raise ValueError(
-                "full_times must be strictly increasing for every sample."
-            )
+            raise ValueError("full_times must be strictly increasing for every sample.")
 
         num_context_points = context_times.size(0)
         if not torch.allclose(full_times[:num_context_points], context_times):
-            raise ValueError(
-                "full_times must start with the provided context_times."
-            )
+            raise ValueError("full_times must start with the provided context_times.")
 
         hidden = torch.zeros(
             1,
@@ -377,7 +365,7 @@ class GRUTimeSeriesBaseline(nn.Module):
             )
             hidden = self.update_cell(step_input, hidden)
             predictions.append(self.readout(hidden))
-            
+
         zero_observation = observed_context.new_zeros(self.input_dim)
         zero_mask = context_mask.new_tensor(False)
 
@@ -420,7 +408,6 @@ class GRUTimeSeriesBaseline(nn.Module):
             batch_predictions.append(sample_predictions.unsqueeze(0))
 
         return torch.cat(batch_predictions, dim=0)
-
 
 
 class GRUNoTimeBaseline(nn.Module):
@@ -479,9 +466,7 @@ class GRUNoTimeBaseline(nn.Module):
                 "[batch, num_context_points, input_dim]."
             )
         if full_times.ndim != 2:
-            raise ValueError(
-                "full_times must have shape [batch, num_query_points]."
-            )
+            raise ValueError("full_times must have shape [batch, num_query_points].")
 
         context_mask = self._normalize_context_mask(context_mask)
 
@@ -521,15 +506,11 @@ class GRUNoTimeBaseline(nn.Module):
                 "context_times must be strictly increasing for every sample."
             )
         if not torch.all(full_times[1:] > full_times[:-1]):
-            raise ValueError(
-                "full_times must be strictly increasing for every sample."
-            )
+            raise ValueError("full_times must be strictly increasing for every sample.")
 
         num_context_points = context_times.size(0)
         if not torch.allclose(full_times[:num_context_points], context_times):
-            raise ValueError(
-                "full_times must start with the provided context_times."
-            )
+            raise ValueError("full_times must start with the provided context_times.")
 
         hidden = torch.zeros(
             1,

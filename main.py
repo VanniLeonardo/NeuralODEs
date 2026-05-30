@@ -28,6 +28,7 @@ from training.utils import plot_ode_flows, visualize_2d_features
 
 console = Console()
 
+
 def str_to_bool(value: str | bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -60,10 +61,14 @@ def add_prefixed_config_args(
     for field, value in config.__dict__.items():
         option = f"--{prefix}-{field.replace('_', '-')}"
         destination = f"{prefix.replace('-', '_')}_{field}"
-        group.add_argument(option, dest=destination, type=arg_type_from_default(value), default=None)
+        group.add_argument(
+            option, dest=destination, type=arg_type_from_default(value), default=None
+        )
 
 
-def apply_prefixed_config_args(config: Any, args: argparse.Namespace, prefix: str) -> None:
+def apply_prefixed_config_args(
+    config: Any, args: argparse.Namespace, prefix: str
+) -> None:
     destination_prefix = prefix.replace("-", "_")
     for field in config.__dict__:
         value = getattr(args, f"{destination_prefix}_{field}", None)
@@ -96,7 +101,8 @@ def get_gpu_memory_stats(device: torch.device) -> dict:
     return {
         "gpu_mem_allocated_mb": torch.cuda.memory_allocated(gpu_id) / (1024**2),
         "gpu_mem_reserved_mb": torch.cuda.memory_reserved(gpu_id) / (1024**2),
-        "gpu_mem_peak_allocated_mb": torch.cuda.max_memory_allocated(gpu_id) / (1024**2),
+        "gpu_mem_peak_allocated_mb": torch.cuda.max_memory_allocated(gpu_id)
+        / (1024**2),
     }
 
 
@@ -110,7 +116,9 @@ def build_neural_ode_config(args: argparse.Namespace) -> ODEConfig:
     return config
 
 
-def run_neural_ode(config: ODEConfig, *, run_name: Optional[str] = None) -> Dict[str, float]:
+def run_neural_ode(
+    config: ODEConfig, *, run_name: Optional[str] = None
+) -> Dict[str, float]:
     console.rule("Phase 1: Neural ODE")
 
     wandb.init(
@@ -149,22 +157,30 @@ def run_neural_ode(config: ODEConfig, *, run_name: Optional[str] = None) -> Dict
     try:
         for epoch in range(config.epochs):
             if device.type == "cuda":
-                gpu_id = device.index if device.index is not None else torch.cuda.current_device()
+                gpu_id = (
+                    device.index
+                    if device.index is not None
+                    else torch.cuda.current_device()
+                )
                 torch.cuda.reset_peak_memory_stats(gpu_id)
 
-            train_metrics = train_epoch(model, train_loader, optimizer, criterion, device)
+            train_metrics = train_epoch(
+                model, train_loader, optimizer, criterion, device
+            )
             last_train_metrics = dict(train_metrics)
             gpu_mem = get_gpu_memory_stats(device)
 
-            wandb.log({"phase": "neural_ode", "epoch": epoch, **train_metrics, **gpu_mem})
+            wandb.log(
+                {"phase": "neural_ode", "epoch": epoch, **train_metrics, **gpu_mem}
+            )
 
             if config.hidden_dim == 2 and epoch % 10 == 0:
                 visualize_2d_features(model, train_loader, device, epoch)
 
             if epoch % 20 == 0:
-                            plot_ode_flows(
-                model, train_loader, device, epoch, is_anode=config.augment_dim > 0
-            )
+                plot_ode_flows(
+                    model, train_loader, device, epoch, is_anode=config.augment_dim > 0
+                )
 
             if epoch % 5 == 0:
                 msg = (
@@ -205,12 +221,16 @@ def kl_divergence(mu: Tensor, logvar: Tensor) -> Tensor:
     return -0.5 * torch.mean(torch.sum(1.0 + logvar - mu.pow(2) - logvar.exp(), dim=-1))
 
 
-def move_batch_to_device(batch: Dict[str, Tensor], device: torch.device) -> Dict[str, Tensor]:
+def move_batch_to_device(
+    batch: Dict[str, Tensor], device: torch.device
+) -> Dict[str, Tensor]:
     return {key: value.to(device) for key, value in batch.items()}
 
 
 @torch.no_grad()
-def evaluate_latent_ode(model: LatentODE, loader: DataLoader, config: LatentODEConfig) -> Dict[str, float]:
+def evaluate_latent_ode(
+    model: LatentODE, loader: DataLoader, config: LatentODEConfig
+) -> Dict[str, float]:
     model.eval()
 
     total_interp_num = 0.0
@@ -242,9 +262,15 @@ def evaluate_latent_ode(model: LatentODE, loader: DataLoader, config: LatentODEC
         interp_pred = preds[:, :context_len, :]
         future_pred = preds[:, context_len:, :]
 
-        interp_sqerr = ((interp_pred - batch["ground_truth"][:, :context_len, :]) ** 2) * batch["interp_mask"]
-        extrap_sqerr = ((future_pred - batch["ground_truth"][:, context_len:, :]) ** 2) * batch["future_mask"]
-        recon_sqerr = ((interp_pred - batch["context_values"]) ** 2) * batch["context_mask"]
+        interp_sqerr = (
+            (interp_pred - batch["ground_truth"][:, :context_len, :]) ** 2
+        ) * batch["interp_mask"]
+        extrap_sqerr = (
+            (future_pred - batch["ground_truth"][:, context_len:, :]) ** 2
+        ) * batch["future_mask"]
+        recon_sqerr = ((interp_pred - batch["context_values"]) ** 2) * batch[
+            "context_mask"
+        ]
 
         total_interp_num += interp_sqerr.sum().item()
         total_interp_den += batch["interp_mask"].sum().item()
@@ -340,7 +366,9 @@ def print_metrics(title: str, metrics: Dict[str, float]) -> None:
 
 
 @torch.no_grad()
-def evaluate_persistence(loader: DataLoader, config: LatentODEConfig) -> Dict[str, float]:
+def evaluate_persistence(
+    loader: DataLoader, config: LatentODEConfig
+) -> Dict[str, float]:
     total_interp_num = 0.0
     total_interp_den = 0.0
     total_extrap_num = 0.0
@@ -358,16 +386,24 @@ def evaluate_persistence(loader: DataLoader, config: LatentODEConfig) -> Dict[st
         full_steps = ground_truth.shape[1]
 
         pred_ctx = torch.zeros_like(observed)
-        last_value = torch.zeros(batch_size, dim, device=observed.device, dtype=observed.dtype)
+        last_value = torch.zeros(
+            batch_size, dim, device=observed.device, dtype=observed.dtype
+        )
         for i in range(context_steps):
             is_obs = context_mask[:, i, :].bool()
             last_value = torch.where(is_obs, observed[:, i, :], last_value)
             pred_ctx[:, i, :] = last_value
 
-        pred_future = last_value.unsqueeze(1).expand(batch_size, full_steps - context_steps, dim)
+        pred_future = last_value.unsqueeze(1).expand(
+            batch_size, full_steps - context_steps, dim
+        )
 
-        interp_sqerr = ((pred_ctx - ground_truth[:, :context_len, :]) ** 2) * interp_mask
-        extrap_sqerr = ((pred_future - ground_truth[:, context_len:, :]) ** 2) * future_mask
+        interp_sqerr = (
+            (pred_ctx - ground_truth[:, :context_len, :]) ** 2
+        ) * interp_mask
+        extrap_sqerr = (
+            (pred_future - ground_truth[:, context_len:, :]) ** 2
+        ) * future_mask
 
         total_interp_num += interp_sqerr.sum().item()
         total_interp_den += interp_mask.sum().item()
@@ -415,7 +451,9 @@ def build_latent_ode_config(args: argparse.Namespace) -> LatentODEConfig:
     return config
 
 
-def run_latent_ode(config: LatentODEConfig, *, run_name: Optional[str] = None) -> Dict[str, float]:
+def run_latent_ode(
+    config: LatentODEConfig, *, run_name: Optional[str] = None
+) -> Dict[str, float]:
     console.rule("Phase 2: Latent ODE")
 
     device = to_torch_device(config.device)
@@ -433,9 +471,9 @@ def run_latent_ode(config: LatentODEConfig, *, run_name: Optional[str] = None) -
     )
 
     dataset = TimeSeriesDataset(config=config)
-    assert len(dataset) == config.num_samples, (
-        f"dataset size {len(dataset)} != num_train+num_val+num_test = {config.num_samples}"
-    )
+    assert (
+        len(dataset) == config.num_samples
+    ), f"dataset size {len(dataset)} != num_train+num_val+num_test = {config.num_samples}"
 
     split_generator = torch.Generator().manual_seed(config.seed)
     train_set, val_set, test_set = random_split(
@@ -475,7 +513,9 @@ def run_latent_ode(config: LatentODEConfig, *, run_name: Optional[str] = None) -
         f"is_variational={config.is_variational} | "
         f"device={device}"
     )
-    console.log(f"dataset sizes | train={len(train_set)} | val={len(val_set)} | test={len(test_set)}")
+    console.log(
+        f"dataset sizes | train={len(train_set)} | val={len(val_set)} | test={len(test_set)}"
+    )
 
     for attr_name in ("num_context", "num_future"):
         if hasattr(dataset, attr_name):
@@ -489,7 +529,9 @@ def run_latent_ode(config: LatentODEConfig, *, run_name: Optional[str] = None) -
             if batch_idx + 1 >= config.profile_num_batches:
                 break
         loader_time = time.time() - start
-        console.log(f"dataloader probe | first {config.profile_num_batches} batches in {loader_time:.2f}s")
+        console.log(
+            f"dataloader probe | first {config.profile_num_batches} batches in {loader_time:.2f}s"
+        )
 
     best_val_interp = float("inf")
     best_state_dict = None
@@ -498,7 +540,9 @@ def run_latent_ode(config: LatentODEConfig, *, run_name: Optional[str] = None) -
         for epoch in range(1, config.epochs + 1):
             sync_cuda(device)
             train_start = time.time()
-            train_metrics = train_latent_ode_one_epoch(model, train_loader, optimizer, config)
+            train_metrics = train_latent_ode_one_epoch(
+                model, train_loader, optimizer, config
+            )
             sync_cuda(device)
             train_time = time.time() - train_start
 
@@ -618,20 +662,31 @@ def run_latent_ode(config: LatentODEConfig, *, run_name: Optional[str] = None) -
                 "test_nfe": float(test_metrics["nfe"]),
                 "test_time_sec": test_time,
                 "best_val_interp": best_val_interp,
-                "persistence_interp": float(persistence_metrics["persistence_interpolation_mse"]),
-                "persistence_extrap": float(persistence_metrics["persistence_extrapolation_mse"]),
+                "persistence_interp": float(
+                    persistence_metrics["persistence_interpolation_mse"]
+                ),
+                "persistence_extrap": float(
+                    persistence_metrics["persistence_extrapolation_mse"]
+                ),
             }
         )
 
         results_dir = Path("results")
         results_dir.mkdir(exist_ok=True)
-        run_tag = run_name or f"seed{config.seed}_odernn{config.use_ode_rnn}_var{config.is_variational}_{config.method}"
+        run_tag = (
+            run_name
+            or f"seed{config.seed}_odernn{config.use_ode_rnn}_var{config.is_variational}_{config.method}"
+        )
         out_path = results_dir / f"{run_tag}.json"
         with open(out_path, "w") as f:
             json.dump(
                 {
-                    "config": {key: str(value) for key, value in config.__dict__.items()},
-                    "test_metrics": {key: float(value) for key, value in test_metrics.items()},
+                    "config": {
+                        key: str(value) for key, value in config.__dict__.items()
+                    },
+                    "test_metrics": {
+                        key: float(value) for key, value in test_metrics.items()
+                    },
                     "best_val_interp": float(best_val_interp),
                     "test_time_sec": float(test_time),
                 },
@@ -645,6 +700,7 @@ def run_latent_ode(config: LatentODEConfig, *, run_name: Optional[str] = None) -
         wandb.finish()
         cleanup_after_phase(device)
 
+
 def parse_integrated_args() -> argparse.Namespace:
     ode_defaults = ODEConfig()
     ode_defaults.hidden_dim = 2
@@ -652,8 +708,7 @@ def parse_integrated_args() -> argparse.Namespace:
 
     latent_defaults = LatentODEConfig()
 
-    parser = argparse.ArgumentParser(
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument("--run-name", type=str, default=None)
 
     add_prefixed_config_args(

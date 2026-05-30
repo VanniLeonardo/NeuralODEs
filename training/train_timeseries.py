@@ -32,9 +32,7 @@ def seed_everything(seed: int) -> None:
 def count_parameters(model: torch.nn.Module) -> int:
     """Counts trainable parameters."""
     return sum(
-        parameter.numel()
-        for parameter in model.parameters()
-        if parameter.requires_grad
+        parameter.numel() for parameter in model.parameters() if parameter.requires_grad
     )
 
 
@@ -53,9 +51,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-    "--run_name",
-    type=str,
-    default=None,
+        "--run_name",
+        type=str,
+        default=None,
     )
 
     parser.add_argument("--batch_size", type=int, default=defaults.batch_size)
@@ -69,12 +67,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gru_time_hidden_dim", type=int, default=None)
     parser.add_argument("--gru_notime_hidden_dim", type=int, default=None)
     parser.add_argument("--input_dim", type=int, default=defaults.input_dim)
-    
+
     parser.add_argument(
-    "--signal_type",
-    type=str,
-    default=defaults.signal_type,
-    choices=["sine", "spiral", "damped"],
+        "--signal_type",
+        type=str,
+        default=defaults.signal_type,
+        choices=["sine", "spiral", "damped"],
     )
 
     parser.add_argument(
@@ -149,7 +147,6 @@ def build_config(args: argparse.Namespace) -> ODEConfig:
     config.in_features = args.input_dim
     config.output_dim = args.input_dim
 
-
     config.context_start = args.context_start
     config.context_end = args.context_end
     config.future_end = args.future_end
@@ -201,6 +198,7 @@ def build_model(config: ODEConfig) -> torch.nn.Module:
         )
 
     raise ValueError(f"Unsupported model_type={config.model_type!r}")
+
 
 def _json_safe(value: Any) -> Any:
     """Converts values into JSON-serializable Python objects."""
@@ -269,7 +267,7 @@ def main() -> None:
     history: list[dict[str, object]] = []
 
     for epoch in range(1, config.epochs + 1):
-        
+
         train_metrics = train_timeseries_epoch(
             model=model,
             dataloader=train_loader,
@@ -307,16 +305,19 @@ def main() -> None:
                 "val_forward_nfe_per_batch": val_metrics["nfe_per_batch"],
             }
         )
-        
+
         history.append(
             {
                 "epoch": epoch,
                 "train_loss": float(train_metrics["loss"]),
                 "train_observed_mse": float(train_metrics["observed_mse"]),
                 "train_interpolation_mse": float(train_metrics["interpolation_mse"]),
-                "train_extrapolation_mse": float(train_metrics["extrapolation_mse"])
-                if train_metrics["extrapolation_mse"] == train_metrics["extrapolation_mse"]
-                else None,
+                "train_extrapolation_mse": (
+                    float(train_metrics["extrapolation_mse"])
+                    if train_metrics["extrapolation_mse"]
+                    == train_metrics["extrapolation_mse"]
+                    else None
+                ),
                 "train_forward_nfe_per_sample": float(train_metrics["nfe_per_sample"]),
                 "train_peak_memory_mb": float(train_metrics["memory_mb"]),
                 "val_loss": float(val_metrics["loss"]),
@@ -366,7 +367,9 @@ def main() -> None:
     results_dir = Path("results")
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    run_tag = args.run_name if args.run_name is not None else build_default_run_name(config)
+    run_tag = (
+        args.run_name if args.run_name is not None else build_default_run_name(config)
+    )
     result_path = results_dir / f"{run_tag}.json"
 
     result_payload = {

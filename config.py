@@ -125,8 +125,8 @@ class LatentODEConfig:
     latent_dim: int = 20
     nhidden: int = 40
 
-    use_ode_rnn: bool = True   
-    encoder_type: str = "odernn"  
+    use_ode_rnn: bool = True
+    encoder_type: str = "odernn"
     is_variational: bool = True
 
     method: str = "rk4"
@@ -139,12 +139,11 @@ class LatentODEConfig:
     batch_size: int = 64
     grad_clip_norm: float = 1.0
 
-    num_train: int = 500       
-    num_val: int = 100         
-    num_test: int = 100        
-    epochs: int = 30           
-    eval_every: int = 5        
-    
+    num_train: int = 500
+    num_val: int = 100
+    num_test: int = 100
+    epochs: int = 30
+    eval_every: int = 5
 
     seq_len: int = 100
     noise_std: float = 0.01
@@ -156,10 +155,8 @@ class LatentODEConfig:
     project_name: str = "latent-ode-phase4-faithful"
 
     missing_pct: float = 0.2
-    burst_missing: bool = False              
-    burst_length_range: tuple = (2, 8)       
-
-    
+    burst_missing: bool = False
+    burst_length_range: tuple = (2, 8)
 
     @property
     def num_samples(self) -> int:
@@ -175,7 +172,9 @@ class LatentODEConfig:
         parser.add_argument("--latent-dim", type=int, default=cls.latent_dim)
         parser.add_argument("--nhidden", type=int, default=cls.nhidden)
         parser.add_argument("--use-ode-rnn", type=_str2bool, default=cls.use_ode_rnn)
-        parser.add_argument("--is-variational", type=_str2bool, default=cls.is_variational)
+        parser.add_argument(
+            "--is-variational", type=_str2bool, default=cls.is_variational
+        )
         parser.add_argument("--method", type=str, default=cls.method)
         parser.add_argument("--encoder-method", type=str, default=cls.encoder_method)
         parser.add_argument("--rtol", type=float, default=cls.rtol)

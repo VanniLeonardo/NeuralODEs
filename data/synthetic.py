@@ -194,18 +194,27 @@ class TimeSeriesDataset(Dataset[Dict[str, Tensor]]):
             tie = 1e-9 * torch.arange(n_future_inner, dtype=torch.float64)
             future_inner = future_inner + tie
             future_times = torch.cat(
-                [future_inner, torch.tensor([self.config.extrap_horizon], dtype=torch.float64)],
+                [
+                    future_inner,
+                    torch.tensor([self.config.extrap_horizon], dtype=torch.float64),
+                ],
                 dim=0,
             ).to(torch.float32)
         else:
             future_times = torch.tensor([self.config.extrap_horizon])
 
-        assert torch.all(context_times[1:] > context_times[:-1]), "context_times not strictly increasing"
-        assert torch.all(future_times[1:] > future_times[:-1]), "future_times not strictly increasing"
-        assert future_times[0] > context_times[-1], "future must start after context ends"
+        assert torch.all(
+            context_times[1:] > context_times[:-1]
+        ), "context_times not strictly increasing"
+        assert torch.all(
+            future_times[1:] > future_times[:-1]
+        ), "future_times not strictly increasing"
+        assert (
+            future_times[0] > context_times[-1]
+        ), "future must start after context ends"
 
         return context_times, future_times
-    
+
     def _burst_mask(self, generator: torch.Generator) -> Tensor:
         """
         Generate a bursty missingness mask: all points observed except for one
@@ -227,10 +236,8 @@ class TimeSeriesDataset(Dataset[Dict[str, Tensor]]):
             torch.randint(lo, max_burst + 1, (1,), generator=generator).item()
         )
         # Start index must leave room for the burst and keep index 0 and last observed
-        max_start = self.num_context - 1 - burst_len   # last valid start
-        start = int(
-            torch.randint(1, max_start, (1,), generator=generator).item()
-        )
+        max_start = self.num_context - 1 - burst_len  # last valid start
+        start = int(torch.randint(1, max_start, (1,), generator=generator).item())
         mask[start : start + burst_len, 0] = 0.0
         return mask
 
@@ -268,7 +275,6 @@ class TimeSeriesDataset(Dataset[Dict[str, Tensor]]):
                 n_kept = int(context_keep.sum().item())
             if n_kept == self.num_context and self.num_context > 1:
                 context_keep[-1] = 0.0
-
 
             # Broadcast the (num_context, 1) mask across input_dim so that
             # multi-dimensional signals get the same mask on every channel
@@ -310,10 +316,16 @@ class TimeSeriesDataset(Dataset[Dict[str, Tensor]]):
             # 2D decaying spiral: x = r(t) cos(ωt + φ), y = r(t) sin(ωt + φ)
             # r(t) = r0 * exp(-α t). Each sample has random r0, ω, φ, α.
             assert self.config.input_dim == 2, "spiral requires input_dim=2"
-            omega = 0.5 + 1.5 * torch.rand(1, generator=generator)   # angular freq in [0.5, 2.0]
+            omega = 0.5 + 1.5 * torch.rand(
+                1, generator=generator
+            )  # angular freq in [0.5, 2.0]
             phase = 2.0 * torch.pi * torch.rand(1, generator=generator)
-            alpha = 0.05 + 0.10 * torch.rand(1, generator=generator) # decay in [0.05, 0.15]
-            r0 = 0.8 + 0.4 * torch.rand(1, generator=generator)      # amplitude in [0.8, 1.2]
+            alpha = 0.05 + 0.10 * torch.rand(
+                1, generator=generator
+            )  # decay in [0.05, 0.15]
+            r0 = 0.8 + 0.4 * torch.rand(
+                1, generator=generator
+            )  # amplitude in [0.8, 1.2]
             r = r0 * torch.exp(-alpha * t)
             x = r * torch.cos(omega * t + phase)
             y = r * torch.sin(omega * t + phase)
@@ -323,7 +335,9 @@ class TimeSeriesDataset(Dataset[Dict[str, Tensor]]):
             # 2D coupled oscillator: two independent damped sines with related freqs.
             assert self.config.input_dim == 2, "damped requires input_dim=2"
             omega1 = 0.5 + 1.5 * torch.rand(1, generator=generator)
-            omega2 = omega1 * (1.0 + 0.3 * torch.rand(1, generator=generator))   # related but not equal
+            omega2 = omega1 * (
+                1.0 + 0.3 * torch.rand(1, generator=generator)
+            )  # related but not equal
             phase1 = 2.0 * torch.pi * torch.rand(1, generator=generator)
             phase2 = 2.0 * torch.pi * torch.rand(1, generator=generator)
             alpha = 0.05 + 0.05 * torch.rand(1, generator=generator)
@@ -334,10 +348,14 @@ class TimeSeriesDataset(Dataset[Dict[str, Tensor]]):
 
         if signal_type == "sine" and self.config.input_dim > 1:
             # Multi-D independent sines (trivial ablation)
-            phases = 2.0 * torch.pi * torch.rand(self.config.input_dim, generator=generator)
+            phases = (
+                2.0 * torch.pi * torch.rand(self.config.input_dim, generator=generator)
+            )
             return torch.sin(t.unsqueeze(-1) + phases)
 
-        raise ValueError(f"unknown signal_type={signal_type} for input_dim={self.config.input_dim}")
+        raise ValueError(
+            f"unknown signal_type={signal_type} for input_dim={self.config.input_dim}"
+        )
 
     def __len__(self) -> int:
         return len(self._samples)

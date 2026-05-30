@@ -5,26 +5,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-plt.rcParams.update({
-    "font.size": 11,
-    "font.family": "serif",
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.grid": True,
-    "grid.alpha": 0.25,
-    "savefig.bbox": "tight",
-    "savefig.dpi": 200,
-    "figure.constrained_layout.use": True,
-    "figure.constrained_layout.h_pad": 0.15,
-    "figure.constrained_layout.w_pad": 0.15,
-    "axes.titlepad": 12,
-    "axes.labelpad": 6,
-})
+plt.rcParams.update(
+    {
+        "font.size": 11,
+        "font.family": "serif",
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.grid": True,
+        "grid.alpha": 0.25,
+        "savefig.bbox": "tight",
+        "savefig.dpi": 200,
+        "figure.constrained_layout.use": True,
+        "figure.constrained_layout.h_pad": 0.15,
+        "figure.constrained_layout.w_pad": 0.15,
+        "axes.titlepad": 12,
+        "axes.labelpad": 6,
+    }
+)
 
 ENCODER_STYLE = {
-    "gru_notime": {"label": "GRU (vanilla)",    "color": "#E69F00", "marker": "s"},
-    "odernn":     {"label": "ODE-RNN",          "color": "#D55E00", "marker": "o"},
-    "gru_time":   {"label": "GRU (time-aware)", "color": "#0072B2", "marker": "^"},
+    "gru_notime": {"label": "GRU (vanilla)", "color": "#E69F00", "marker": "s"},
+    "odernn": {"label": "ODE-RNN", "color": "#D55E00", "marker": "o"},
+    "gru_time": {"label": "GRU (time-aware)", "color": "#0072B2", "marker": "^"},
 }
 
 results_dir = Path("results")
@@ -50,14 +52,18 @@ def load_persistence_baseline():
         m = data.get("test_metrics", {})
         for k in ["persistence_interp", "persistence_interpolation_mse"]:
             if k in m:
-                interp_vals.append(m[k]); break
+                interp_vals.append(m[k])
+                break
         for k in ["persistence_extrap", "persistence_extrapolation_mse"]:
             if k in m:
-                extrap_vals.append(m[k]); break
+                extrap_vals.append(m[k])
+                break
     if not interp_vals:
         return {"interp": 0.0207, "extrap": 1.4379}
-    return {"interp": float(np.mean(interp_vals)),
-            "extrap": float(np.mean(extrap_vals))}
+    return {
+        "interp": float(np.mean(interp_vals)),
+        "extrap": float(np.mean(extrap_vals)),
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -68,8 +74,10 @@ def figure_1_bars():
     persistence = load_persistence_baseline()
 
     encoders = ["gru_notime", "odernn", "gru_time"]
-    metrics = [("interpolation_mse", "Interpolation"),
-               ("extrapolation_mse", "Extrapolation")]
+    metrics = [
+        ("interpolation_mse", "Interpolation"),
+        ("extrapolation_mse", "Extrapolation"),
+    ]
 
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.8))
 
@@ -83,14 +91,28 @@ def figure_1_bars():
             labels.append(ENCODER_STYLE[enc]["label"])
 
         x = np.arange(len(encoders))
-        bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors, alpha=0.92,
-                      edgecolor="black", linewidth=0.8, width=0.65)
+        bars = ax.bar(
+            x,
+            means,
+            yerr=stds,
+            capsize=5,
+            color=colors,
+            alpha=0.92,
+            edgecolor="black",
+            linewidth=0.8,
+            width=0.65,
+        )
 
         for bar, m, s in zip(bars, means, stds):
-            ax.text(bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + s + max(means) * 0.04,
-                    f"{m:.4f}",
-                    ha="center", va="bottom", fontsize=9, fontweight="bold")
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + s + max(means) * 0.04,
+                f"{m:.4f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                fontweight="bold",
+            )
 
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=12, ha="right", fontsize=10)
@@ -103,18 +125,30 @@ def figure_1_bars():
         pers_key = "interp" if metric_key == "interpolation_mse" else "extrap"
         pers_val = persistence[pers_key]
         if pers_val < ymax:
-            ax.axhline(pers_val, color="gray", linestyle="--", linewidth=1.2,
-                       label=f"Persistence: {pers_val:.3f}")
+            ax.axhline(
+                pers_val,
+                color="gray",
+                linestyle="--",
+                linewidth=1.2,
+                label=f"Persistence: {pers_val:.3f}",
+            )
             ax.legend(loc="upper left", fontsize=9, frameon=False)
         else:
-            ax.annotate(f"Persistence baseline\n= {pers_val:.2f}  (off-scale ↑)",
-                        xy=(len(encoders) - 1, ymax * 0.95),
-                        xytext=(len(encoders) - 1, ymax * 0.72),
-                        ha="right", fontsize=9, color="gray",
-                        arrowprops=dict(arrowstyle="->", color="gray", lw=1))
+            ax.annotate(
+                f"Persistence baseline\n= {pers_val:.2f}  (off-scale ↑)",
+                xy=(len(encoders) - 1, ymax * 0.95),
+                xytext=(len(encoders) - 1, ymax * 0.72),
+                ha="right",
+                fontsize=9,
+                color="gray",
+                arrowprops=dict(arrowstyle="->", color="gray", lw=1),
+            )
 
-    fig.suptitle("Three-Way Encoder Comparison\n1D sine, 30 epochs, n=2 seeds",
-                 fontsize=12, fontweight="bold")
+    fig.suptitle(
+        "Three-Way Encoder Comparison\n1D sine, 30 epochs, n=2 seeds",
+        fontsize=12,
+        fontweight="bold",
+    )
     out = figures_dir / "figure_1_threeway_bars.pdf"
     fig.savefig(out)
     fig.savefig(out.with_suffix(".png"))
@@ -159,15 +193,24 @@ def figure_2_dataset_showcase():
         keep = s["context_mask"].squeeze().numpy().astype(bool)
 
         ax.axvspan(0, cfg_sine.train_horizon, color=sine_palette[i], alpha=0.06)
-        ax.axvspan(cfg_sine.train_horizon, cfg_sine.extrap_horizon,
-                   color="gray", alpha=0.06)
+        ax.axvspan(
+            cfg_sine.train_horizon, cfg_sine.extrap_horizon, color="gray", alpha=0.06
+        )
 
-        ax.plot(t_full, gt, color=sine_palette[i], linewidth=2,
-                label="Ground truth")
-        ax.scatter(t_ctx[keep], ctx_vals[keep], s=28, color="black",
-                   zorder=3, label="Observed")
-        ax.scatter(t_ctx[~keep], ctx_vals[~keep], s=36, facecolors="white",
-                   edgecolors="black", linewidth=1.2, zorder=3, label="Masked")
+        ax.plot(t_full, gt, color=sine_palette[i], linewidth=2, label="Ground truth")
+        ax.scatter(
+            t_ctx[keep], ctx_vals[keep], s=28, color="black", zorder=3, label="Observed"
+        )
+        ax.scatter(
+            t_ctx[~keep],
+            ctx_vals[~keep],
+            s=36,
+            facecolors="white",
+            edgecolors="black",
+            linewidth=1.2,
+            zorder=3,
+            label="Masked",
+        )
 
         ax.axvline(cfg_sine.train_horizon, color="gray", linestyle=":", linewidth=1)
         ax.set_title(f"1D sine: sample {idx}", fontsize=11, pad=10)
@@ -190,23 +233,43 @@ def figure_2_dataset_showcase():
 
         points = gt.reshape(-1, 1, 2)
         segs = np.concatenate([points[:-1], points[1:]], axis=1)
-        lc = LineCollection(segs, cmap=cmap, linewidth=2.0,
-                            array=t_full[:-1], alpha=0.85)
+        lc = LineCollection(
+            segs, cmap=cmap, linewidth=2.0, array=t_full[:-1], alpha=0.85
+        )
         ax.add_collection(lc)
         last_lc = lc
 
         ctx_xy = s["context_values"].numpy()
-        ax.scatter(ctx_xy[keep, 0], ctx_xy[keep, 1], s=22, color="black",
-                   zorder=3, label="Observed")
-        ax.scatter(ctx_xy[~keep, 0], ctx_xy[~keep, 1], s=30, facecolors="white",
-                   edgecolors="black", linewidth=1.2, zorder=3, label="Masked")
+        ax.scatter(
+            ctx_xy[keep, 0],
+            ctx_xy[keep, 1],
+            s=22,
+            color="black",
+            zorder=3,
+            label="Observed",
+        )
+        ax.scatter(
+            ctx_xy[~keep, 0],
+            ctx_xy[~keep, 1],
+            s=30,
+            facecolors="white",
+            edgecolors="black",
+            linewidth=1.2,
+            zorder=3,
+            label="Masked",
+        )
 
         train_idx = np.searchsorted(t_full, cfg_spiral.train_horizon)
-        ax.scatter(*gt[0], s=80, marker="*", color="red",
-                   zorder=4, label="t=0")
+        ax.scatter(*gt[0], s=80, marker="*", color="red", zorder=4, label="t=0")
         if train_idx < len(t_full):
-            ax.scatter(*gt[train_idx], s=80, marker="X", color="dimgray",
-                       zorder=4, label=f"t={cfg_spiral.train_horizon:.0f}")
+            ax.scatter(
+                *gt[train_idx],
+                s=80,
+                marker="X",
+                color="dimgray",
+                zorder=4,
+                label=f"t={cfg_spiral.train_horizon:.0f}",
+            )
 
         ax.set_title(f"2D spiral: sample {idx}", fontsize=11, pad=10)
         ax.set_xlabel("x", labelpad=6)
@@ -216,14 +279,16 @@ def figure_2_dataset_showcase():
         ax.set_aspect("equal")
 
         m = max(np.abs(gt).max(), 0.1) * 1.2
-        ax.set_xlim(-m, m); ax.set_ylim(-m, m)
+        ax.set_xlim(-m, m)
+        ax.set_ylim(-m, m)
 
     # Colorbar attached to the spiral row only
     cbar = fig.colorbar(last_lc, ax=axes[1], shrink=0.9, pad=0.02)
     cbar.set_label("Time", fontsize=9, labelpad=6)
 
-    fig.suptitle("Synthetic Datasets: 1D Sine and 2D Spiral",
-                 fontsize=13, fontweight="bold")
+    fig.suptitle(
+        "Synthetic Datasets: 1D Sine and 2D Spiral", fontsize=13, fontweight="bold"
+    )
 
     out = figures_dir / "figure_2_dataset_showcase.pdf"
     fig.savefig(out)
@@ -251,21 +316,36 @@ def figure_3_ranking_summary():
 
     for i, enc in enumerate(encoders):
         means = [np.mean([r[m] for r in grouped[enc]]) for m in metrics]
-        stds  = [np.std([r[m] for r in grouped[enc]], ddof=1) for m in metrics]
+        stds = [np.std([r[m] for r in grouped[enc]], ddof=1) for m in metrics]
         offset = (i - 1) * bar_w
-        bars = ax.bar(x + offset, means, bar_w, yerr=stds, capsize=4,
-                      color=ENCODER_STYLE[enc]["color"], alpha=0.92,
-                      edgecolor="black", linewidth=0.7,
-                      label=ENCODER_STYLE[enc]["label"])
+        bars = ax.bar(
+            x + offset,
+            means,
+            bar_w,
+            yerr=stds,
+            capsize=4,
+            color=ENCODER_STYLE[enc]["color"],
+            alpha=0.92,
+            edgecolor="black",
+            linewidth=0.7,
+            label=ENCODER_STYLE[enc]["label"],
+        )
         for bar, m in zip(bars, means):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() * 1.02,
-                    f"{m:.3f}", ha="center", va="bottom", fontsize=8)
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() * 1.02,
+                f"{m:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
 
     ax.set_xticks(x)
     ax.set_xticklabels(metric_labels, fontsize=11)
     ax.set_ylabel("Test MSE")
-    ax.set_title("Encoder Comparison Across Metrics", fontsize=12,
-                 fontweight="bold", pad=12)
+    ax.set_title(
+        "Encoder Comparison Across Metrics", fontsize=12, fontweight="bold", pad=12
+    )
     ax.legend(loc="upper left", fontsize=10, frameon=False)
     ax.set_yscale("log")  # log scale makes the gaps visible
 

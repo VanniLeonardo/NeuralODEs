@@ -119,16 +119,18 @@ def main():
 
         best_test_acc = max(best_test_acc, test_metrics["accuracy"])
 
-        wandb.log({
-            "epoch": epoch,
-            "train_loss": train_metrics["loss"],
-            "train_accuracy": train_metrics["accuracy"],
-            "test_loss": test_metrics["loss"],
-            "test_accuracy": test_metrics["accuracy"],
-            "best_test_accuracy": best_test_acc,
-            "num_parameters": n_params,
-            "memory_mb": train_metrics["memory_mb"],
-        })
+        wandb.log(
+            {
+                "epoch": epoch,
+                "train_loss": train_metrics["loss"],
+                "train_accuracy": train_metrics["accuracy"],
+                "test_loss": test_metrics["loss"],
+                "test_accuracy": test_metrics["accuracy"],
+                "best_test_accuracy": best_test_acc,
+                "num_parameters": n_params,
+                "memory_mb": train_metrics["memory_mb"],
+            }
+        )
 
         if epoch % 5 == 0:
             print(

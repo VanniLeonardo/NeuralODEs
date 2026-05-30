@@ -67,9 +67,12 @@ class IrregularSineWaveDataset(Dataset):
 
         n_context_inner = self.n_context_points - 1
         if n_context_inner > 0:
-            context_inner = self.context_start + eps + (
-                self.context_end - self.context_start - 2 * eps
-            ) * torch.rand(n_context_inner, generator=generator)
+            context_inner = (
+                self.context_start
+                + eps
+                + (self.context_end - self.context_start - 2 * eps)
+                * torch.rand(n_context_inner, generator=generator)
+            )
             context_inner = torch.sort(context_inner).values
             context_times = torch.cat(
                 [torch.tensor([self.context_start]), context_inner], dim=0
@@ -79,9 +82,12 @@ class IrregularSineWaveDataset(Dataset):
 
         n_future_inner = self.n_future_points - 1
         if n_future_inner > 0:
-            future_inner = self.context_end + eps + (
-                self.future_end - self.context_end - 2 * eps
-            ) * torch.rand(n_future_inner, generator=generator)
+            future_inner = (
+                self.context_end
+                + eps
+                + (self.future_end - self.context_end - 2 * eps)
+                * torch.rand(n_future_inner, generator=generator)
+            )
             future_inner = torch.sort(future_inner).values
             future_times = torch.cat(
                 [future_inner, torch.tensor([self.future_end])], dim=0
@@ -93,14 +99,18 @@ class IrregularSineWaveDataset(Dataset):
 
     def _sample_observation_mask(self, generator: torch.Generator) -> torch.Tensor:
         """Samples a context mask and guarantees a usable interpolation task."""
-        mask = torch.rand(self.n_context_points, generator=generator) < self.observation_prob
+        mask = (
+            torch.rand(self.n_context_points, generator=generator)
+            < self.observation_prob
+        )
 
-        
         mask[0] = True
 
         observed_count = int(mask.sum().item())
         if observed_count < self.min_observed_context_points:
-            candidate_indices = torch.randperm(self.n_context_points, generator=generator)
+            candidate_indices = torch.randperm(
+                self.n_context_points, generator=generator
+            )
             for index in candidate_indices.tolist():
                 mask[index] = True
                 observed_count += 1
@@ -119,7 +129,9 @@ class IrregularSineWaveDataset(Dataset):
 
         ground_truth = self._generate_signal(full_times, generator)
 
-        context_values = ground_truth[: self.n_context_points] + self.noise_std * torch.randn(
+        context_values = ground_truth[
+            : self.n_context_points
+        ] + self.noise_std * torch.randn(
             self.n_context_points,
             self.input_dim,
             generator=generator,
@@ -154,6 +166,7 @@ class IrregularSineWaveDataset(Dataset):
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         sample = self.samples[index]
         return {key: value.clone() for key, value in sample.items()}
+
     def _generate_signal(
         self,
         t: torch.Tensor,

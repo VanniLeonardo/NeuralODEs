@@ -53,7 +53,9 @@ def compute_context_training_metrics(
     batch_size, context_steps, output_dim = context_predictions.shape
 
     if batch["context_values"].shape != (batch_size, context_steps, output_dim):
-        raise ValueError("context_values shape is inconsistent with context_predictions.")
+        raise ValueError(
+            "context_values shape is inconsistent with context_predictions."
+        )
 
     if batch["context_mask"].shape != (batch_size, context_steps, 1):
         raise ValueError("context_mask must have shape [batch, T_ctx, 1].")
@@ -206,7 +208,7 @@ def train_timeseries_epoch(
 
     peak_memory_mb = 0.0
     if device.type == "cuda":
-        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        peak_memory_mb = torch.cuda.max_memory_allocated(device) / (1024**2)
 
     return {
         "loss": total_loss / total_samples,
@@ -267,4 +269,4 @@ def evaluate_timeseries(
         "extrapolation_mse": total_extrapolation_mse / total_samples,
         "nfe_per_sample": total_nfe / total_samples if total_samples > 0 else 0.0,
         "nfe_per_batch": total_nfe / total_batches if total_batches > 0 else 0.0,
-    }   
+    }

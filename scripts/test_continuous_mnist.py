@@ -6,12 +6,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 train_loader, _ = get_mnist_dataloaders(batch_size=64)
 
-model = ODENet(
-    data_dim=784,
-    hidden_dim=128,
-    num_classes=10,
-    solver_type="dopri5"
-).to(device)
+model = ODENet(data_dim=784, hidden_dim=128, num_classes=10, solver_type="dopri5").to(
+    device
+)
 
 x, y = next(iter(train_loader))
 x, y = x.to(device), y.to(device)

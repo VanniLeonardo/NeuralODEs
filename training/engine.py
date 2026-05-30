@@ -51,7 +51,7 @@ def train_epoch(
         "accuracy": correct / total_samples,
     }
     if device.type == "cuda":
-        metrics["memory_mb"] = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        metrics["memory_mb"] = torch.cuda.max_memory_allocated(device) / (1024**2)
     if nfe_stats:
         metrics.update(nfe_stats.summary())
 

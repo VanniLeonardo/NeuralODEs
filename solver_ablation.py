@@ -27,9 +27,7 @@ def _build_run_configs(
     Args:
         cfg (SolverAblationConfig): The ablation configuration.
     """
-    runs: List[Tuple[str, float, float]] = [
-        (s, 0.0, 0.0) for s in cfg.fixed_solvers
-    ]
+    runs: List[Tuple[str, float, float]] = [(s, 0.0, 0.0) for s in cfg.fixed_solvers]
     for s in cfg.adaptive_solvers:
         for tol in cfg.tolerances:
             runs.append((s, tol, tol))
@@ -97,12 +95,14 @@ def _run_single(
 
         val_metrics = eval_epoch(model, val_loader, criterion, device)
 
-        wandb.log({
-            "epoch": epoch,
-            "epoch_time_s": epoch_time,
-            **{f"train_{k}": v for k, v in train_metrics.items()},
-            **{f"val_{k}": v for k, v in val_metrics.items()},
-        })
+        wandb.log(
+            {
+                "epoch": epoch,
+                "epoch_time_s": epoch_time,
+                **{f"train_{k}": v for k, v in train_metrics.items()},
+                **{f"val_{k}": v for k, v in val_metrics.items()},
+            }
+        )
 
         if epoch % 5 == 0:
             console.log(

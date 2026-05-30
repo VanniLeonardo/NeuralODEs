@@ -12,6 +12,7 @@ from training.timeseries_engine import (
 from data.timeseries import IrregularSineWaveDataset
 from models.ode_rnn import GRUNoTimeBaseline, GRUTimeSeriesBaseline, ODERNN
 
+
 def _build_batch(batch_size: int = 3) -> dict[str, torch.Tensor]:
     dataset = IrregularSineWaveDataset(
         num_samples=batch_size,
@@ -28,14 +29,15 @@ def _build_batch(batch_size: int = 3) -> dict[str, torch.Tensor]:
         for key in samples[0].keys()
     }
 
+
 def _build_manual_metric_batch() -> dict[str, torch.Tensor]:
     """Tiny hand-crafted batch for exact metric checks."""
     return {
-        "observed_context": torch.tensor([[[10.0], [0.0]]]),   
-        "context_values": torch.tensor([[[10.0], [20.0]]]),    
+        "observed_context": torch.tensor([[[10.0], [0.0]]]),
+        "context_values": torch.tensor([[[10.0], [20.0]]]),
         "context_times": torch.tensor([[0.0, 1.0]]),
-        "context_mask": torch.tensor([[[1.0], [0.0]]]),        
-        "interp_mask": torch.tensor([[[0.0], [1.0]]]),        
+        "context_mask": torch.tensor([[[1.0], [0.0]]]),
+        "interp_mask": torch.tensor([[[0.0], [1.0]]]),
         "full_times": torch.tensor([[0.0, 1.0, 2.0]]),
         "ground_truth": torch.tensor([[[100.0], [200.0], [300.0]]]),
         "future_mask": torch.tensor([[[1.0]]]),
@@ -130,6 +132,7 @@ def test_gru_baseline_shape_consistency() -> None:
 
     assert predictions.shape == batch["ground_truth"].shape
 
+
 def test_gru_no_time_baseline_shape_consistency() -> None:
     batch = _build_batch()
     model = GRUNoTimeBaseline(
@@ -194,10 +197,7 @@ def test_ode_rnn_gradient_flow() -> None:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available.")
 def test_ode_rnn_device_agnostic() -> None:
     device = torch.device("cuda:0")
-    batch = {
-        key: value.to(device)
-        for key, value in _build_batch(batch_size=2).items()
-    }
+    batch = {key: value.to(device) for key, value in _build_batch(batch_size=2).items()}
     model = ODERNN(
         input_dim=1,
         hidden_dim=8,
@@ -250,7 +250,9 @@ def test_compute_timeseries_metrics_matches_manual_values() -> None:
 
     assert torch.isclose(metrics["extrapolation_mse"], torch.tensor(88209.0))
 
-    expected_full = torch.tensor(((1 - 100) ** 2 + (2 - 200) ** 2 + (3 - 300) ** 2) / 3.0)
+    expected_full = torch.tensor(
+        ((1 - 100) ** 2 + (2 - 200) ** 2 + (3 - 300) ** 2) / 3.0
+    )
     assert torch.isclose(metrics["loss"], expected_full)
 
 
@@ -342,6 +344,7 @@ def test_evaluate_timeseries_reports_both_nfe_normalizations() -> None:
     assert metrics["nfe_per_sample"] == 0.0
     assert metrics["nfe_per_batch"] == 0.0
 
+
 def test_multidim_sine_dataset_shapes_are_consistent() -> None:
     dataset = IrregularSineWaveDataset(
         num_samples=2,
@@ -358,7 +361,8 @@ def test_multidim_sine_dataset_shapes_are_consistent() -> None:
     assert sample["context_mask"].shape == (6, 1)
     assert sample["interp_mask"].shape == (6, 1)
     assert sample["ground_truth"].shape == (10, 3)
-    assert sample["future_mask"].shape == (4, 1)    
+    assert sample["future_mask"].shape == (4, 1)
+
 
 def test_spiral_dataset_shapes_are_consistent() -> None:
     dataset = IrregularSineWaveDataset(
