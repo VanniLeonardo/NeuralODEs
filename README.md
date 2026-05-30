@@ -74,13 +74,7 @@ MNIST is downloaded automatically by `torchvision` into `./data` the first time 
 
 ## Quick checks
 
-Run only the unit-test directory:
-
-```bash
-pytest tests
-```
-
-The files `scripts/test_continuous_mnist.py` and `scripts/test_discrete_mnist.py` are manual smoke scripts, not the main unit-test suite. Run them directly only when checking one MNIST forward pass:
+The files `scripts/test_continuous_mnist.py` and `scripts/test_discrete_mnist.py` are manual smoke scripts. Run them directly only when checking one MNIST forward pass:
 
 ```bash
 python -m scripts.test_discrete_mnist
