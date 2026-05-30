@@ -508,7 +508,7 @@ def run_latent_ode(
     optimizer = optim.Adam(model.parameters(), lr=config.lr)
 
     console.log(
-        f"phase 4 faithful run | "
+        f"phase 4 run | "
         f"encoder_type={getattr(config, 'encoder_type', 'odernn' if config.use_ode_rnn else 'gru_time')} | "
         f"is_variational={config.is_variational} | "
         f"device={device}"
