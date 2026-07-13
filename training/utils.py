@@ -3,11 +3,35 @@ import os
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
-import wandb
 from mpl_toolkits.mplot3d import Axes3D
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _PLOTS_DIR: str = "plots"
+
+
+def set_seed(seed: int, deterministic: bool = False) -> None:
+    """Seed python / numpy / torch / cuda for reproducibility.
+
+    Note: adaptive ODE solvers and cuDNN are not bit-exact across GPUs/drivers
+    even at a fixed seed. ``deterministic=True`` sets cuDNN deterministic mode and
+    ``torch.use_deterministic_algorithms`` where available; the adaptive-solver
+    step controller can still vary. Reproduction tolerances are documented in the
+    README rather than assumed exact.
+    """
+    import random
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception:
+            pass
 
 
 def prepare_ode_hidden_state(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
@@ -33,6 +57,7 @@ def visualize_2d_features(
     dataloader: torch.utils.data.DataLoader,
     device: torch.device,
     epoch: int,
+    logger: Optional[Any] = None,
 ) -> None:
     """Passes 2D data through the ODE block and plots the deformed feature space.
 
@@ -78,7 +103,8 @@ def visualize_2d_features(
     os.makedirs(_PLOTS_DIR, exist_ok=True)
     plot_path = f"{_PLOTS_DIR}/features_epoch_{epoch}.png"
     plt.savefig(plot_path)
-    wandb.log({"feature_space": wandb.Image(plot_path)}, commit=False)
+    if logger is not None:
+        logger.log_image("feature_space", plot_path)
     plt.close()
 
 
@@ -88,6 +114,7 @@ def plot_ode_flows(
     device: torch.device,
     epoch: int,
     is_anode: bool = False,
+    logger: Optional[Any] = None,
 ) -> None:
     """Plots the continuous ODE trajectories for a batch of data.
 
@@ -153,7 +180,8 @@ def plot_ode_flows(
     os.makedirs(_PLOTS_DIR, exist_ok=True)
     plot_path = f"{_PLOTS_DIR}/flow_epoch_{epoch}.png"
     plt.savefig(plot_path)
-    wandb.log({"ode_flow": wandb.Image(plot_path)}, commit=False)
+    if logger is not None:
+        logger.log_image("ode_flow", plot_path)
     plt.close()
 
 

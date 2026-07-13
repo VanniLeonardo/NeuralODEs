@@ -1,8 +1,27 @@
+import os
 import torch
 import torch.nn as nn
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from training.utils import NFEStats
+
+
+def _max_batches(explicit: Optional[int] = None) -> Optional[int]:
+    """Batch cap for fast smoke/CI runs.
+
+    Priority: explicit argument > ``$NODE_MAX_BATCHES`` env var > None (no cap).
+    Lets ``make smoke`` exercise the full training pipeline in seconds without a GPU.
+    """
+    if explicit is not None:
+        return explicit
+    raw = os.environ.get("NODE_MAX_BATCHES")
+    if raw is None or raw == "":
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
 
 
 def train_epoch(
@@ -23,7 +42,10 @@ def train_epoch(
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
-    for x, y in dataloader:
+    cap = _max_batches()
+    for batch_idx, (x, y) in enumerate(dataloader):
+        if cap is not None and batch_idx >= cap:
+            break
         x, y = x.to(device), y.to(device)
 
         optimizer.zero_grad()
@@ -72,8 +94,11 @@ def eval_epoch(
     has_ode_func = hasattr(model, "ode_func")
     fwd_nfe: List[int] = []
 
+    cap = _max_batches()
     with torch.no_grad():
-        for x, y in dataloader:
+        for batch_idx, (x, y) in enumerate(dataloader):
+            if cap is not None and batch_idx >= cap:
+                break
             x, y = x.to(device), y.to(device)
             logits = model(x)
 

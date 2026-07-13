@@ -13,6 +13,41 @@ The final report should be read together with this repository. The code is organ
 
 ---
 
+## ReScience C reproduction (start here)
+
+This repository is being converted into a **ReScience C** replication of **Dupont et al.
+2019 (Augmented Neural ODEs)** (primary) and a subset of **Chen et al. 2018 (Neural ODEs)**
+claims. See [`REPLICATION_PLAN.md`](REPLICATION_PLAN.md) for scope and
+[`CHANGELOG_REPLICATION.md`](CHANGELOG_REPLICATION.md) for changes vs the coursework.
+The Rubanova / Latent-ODE / sine / spiral experiments are **out of scope** and excluded
+(see [`extra/README.md`](extra/README.md)).
+
+**No external accounts are needed.** Experiment logging defaults to a local CSV backend
+(`NODE_LOGGER=csv`); set `NODE_LOGGER=wandb` only to opt into Weights & Biases.
+
+```bash
+# 1. Fast pipeline check — no GPU, no accounts, < 5 min (verified in a clean container):
+make smoke
+
+# 2. Verify the clone-and-run acceptance gate in a fresh CPU Docker container:
+make docker-smoke
+
+# 3. Full reproduction at paper settings (GPU):
+make reproduce-all            # or per-artifact: make table2 / table3 / solver-ablation / mnist-baselines
+
+# 4. Gated unit tests:
+make test
+```
+
+Pinned environment: [`environment.yml`](environment.yml) (conda/GPU),
+[`requirements.txt`](requirements.txt) (pip), [`requirements-lock-cpu.txt`](requirements-lock-cpu.txt)
+(fully-resolved CPU lock), and a [`Dockerfile`](Dockerfile) (CPU image used for the smoke gate).
+Reference hardware for the committed numbers: **NVIDIA RTX 3090, driver 595, CUDA 12.1**.
+Note: adaptive ODE solvers + cuDNN are not bit-exact across GPUs/drivers even at a fixed
+seed — results reproduce within a documented tolerance, not to the last digit.
+
+---
+
 ## Repository structure
 
 ```text
@@ -61,11 +96,10 @@ conda env create -f environment.yml
 conda activate neural_odes
 ```
 
-The code uses Weights & Biases for logging. To keep all runs local and avoid requiring an online W&B account, set:
-
-```bash
-export WANDB_MODE=offline
-```
+Logging defaults to a local **CSV backend** — no Weights & Biases account is required.
+To opt into W&B instead, install it (`pip install wandb`) and set `NODE_LOGGER=wandb`
+(offline by default; `WANDB_MODE=online` to sync). To silence logging entirely use
+`NODE_LOGGER=none`.
 
 MNIST is downloaded automatically by `torchvision` into `./data` the first time an MNIST script is run.
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from torchdiffeq import odeint_adjoint as odeint
-from logging import config
 from typing import Dict, Optional, Tuple
 from torch import Tensor
 from config import LatentODEConfig

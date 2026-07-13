@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 from typing import List, Tuple
 
@@ -44,15 +45,35 @@ def plot_bar(
 
 
 def main() -> None:
-    """Generate final corrected ANODE figures from flat CSV tables."""
-    results_dir = Path("results/anode/final")
-    figures_dir = Path("figures/anode/corrected")
+    """Generate final corrected ANODE figures from flat CSV tables.
+
+    Reads the deterministic aggregated tables produced by
+    ``scripts/aggregate_anode_results.py``; if they are missing it runs the
+    aggregation first, so the Table 2/3 figures regenerate end-to-end with no
+    manual step (the coursework required hand-aggregated, job-id-named CSVs).
+    """
+    parser = argparse.ArgumentParser(description="Plot corrected ANODE figures.")
+    parser.add_argument("--raw_dir", type=str, default="results/anode")
+    parser.add_argument("--results_dir", type=str, default="results/anode/final")
+    parser.add_argument("--figures_dir", type=str, default="figures/anode/corrected")
+    args = parser.parse_args()
+
+    raw_dir = Path(args.raw_dir)
+    results_dir = Path(args.results_dir)
+    figures_dir = Path(args.figures_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    circles = load_csv(results_dir / "circles_corrected_flat_table_job492199.csv")
-    slice_df = load_csv(
-        results_dir / "slice_corrected_flat_table_job492288_epochs500.csv"
-    )
+    circles_path = results_dir / "circles_aggregated.csv"
+    slice_path = results_dir / "slice_aggregated.csv"
+    if not circles_path.exists() or not slice_path.exists():
+        from scripts.aggregate_anode_results import aggregate
+
+        print("[plot] aggregated tables missing; running aggregation...")
+        aggregate(raw_dir / "circles_summary.csv", circles_path)
+        aggregate(raw_dir / "slice_circles_summary.csv", slice_path)
+
+    circles = load_csv(circles_path)
+    slice_df = load_csv(slice_path)
 
     circle_plots: List[Tuple[str, str, str, str, str]] = [
         (

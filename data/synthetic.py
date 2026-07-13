@@ -6,7 +6,6 @@ from sklearn.datasets import make_circles as sklearn_make_circles
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from typing import Tuple
 from dataclasses import dataclass
-from email import generator
 from typing import Dict
 from torch import Tensor
 from config import LatentODEConfig

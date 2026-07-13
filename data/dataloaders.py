@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from torchvision import datasets, transforms
-from typing import Tuple
+from typing import Optional, Tuple
 
 from data.synthetic import make_circles, make_moons, make_spirals
 
@@ -14,6 +14,7 @@ def get_mnist_dataloaders(
     batch_size: int,
     data_root: str = "./data",
     flatten: bool = True,
+    seed: Optional[int] = None,
 ) -> Tuple[DataLoader, DataLoader]:
     """Returns train and test DataLoaders for MNIST.
 
@@ -21,6 +22,10 @@ def get_mnist_dataloaders(
         batch_size (int): Batch size for both loaders.
         data_root (str): Directory where MNIST is downloaded.
         flatten (bool): If True, flattens images from [1, 28, 28] to [784].
+        seed (Optional[int]): If given, the train-loader shuffle order is made
+            reproducible via a seeded generator. The original code left the train
+            shuffle on the unseeded global RNG, so MNIST results were not
+            reproducible run-to-run.
     """
     transform_list = [transforms.ToTensor()]
     if flatten:
@@ -34,8 +39,16 @@ def get_mnist_dataloaders(
         root=data_root, train=False, download=True, transform=transform
     )
 
+    generator = None
+    if seed is not None:
+        generator = torch.Generator().manual_seed(seed)
+
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=0
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+        generator=generator,
     )
     test_loader = DataLoader(
         test_dataset, batch_size=batch_size, shuffle=False, num_workers=0

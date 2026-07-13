@@ -23,6 +23,11 @@ class SolverAblationConfig:
     lr: float = 1e-3
     epochs: int = 50
 
+    seed: int = 0
+    results_dir: str = "results/solver_ablation"
+    # Cap the number of (solver, tol) configurations run; 0 = all. Used by `make smoke`.
+    max_configs: int = 0
+
 
 @dataclass
 class ANODECirclesConfig:

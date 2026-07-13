@@ -218,8 +218,21 @@ wandb/
 
 digest.txt
 plots/
-# Experiment outputs
-results/
+# Experiment outputs.
+# Canonical result artifacts (committed CSV/JSON that figures are built from) are
+# tracked; bulk/verbose outputs are ignored. This keeps the results->figure
+# pipeline regenerable from committed data (a ReScience requirement).
+results/**
+!results/**/
+!results/*.csv
+!results/*.json
+!results/**/*.csv
+!results/**/*.json
+# Per-epoch logger dumps are reproducible detail, not canonical artifacts.
+results/logs/**
+# `make smoke` scratch outputs are never committed.
+.smoke/
+results/smoke/**
 figures/
 logs/
 *.tar.gz

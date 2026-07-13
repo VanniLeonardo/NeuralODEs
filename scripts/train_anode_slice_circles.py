@@ -14,12 +14,13 @@ if str(PROJECT_ROOT) not in sys.path:
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-import wandb
 from rich.console import Console
 
 from data.synthetic import make_circles
 from models.networks import ODENet
 from training.engine import eval_epoch, train_epoch
+from training.logging_backend import get_logger
+from training.utils import set_seed
 
 console = Console()
 
@@ -229,9 +230,8 @@ def _run_single(
     device: torch.device,
 ) -> Dict[str, Any]:
     """Runs one missing-slice NODE/ANODE experiment."""
-    torch.manual_seed(seed)
+    set_seed(seed)
     if device.type == "cuda":
-        torch.cuda.manual_seed_all(seed)
         torch.cuda.reset_peak_memory_stats(device)
 
     model_name = "NODE" if augment_dim == 0 else f"ANODE-p{augment_dim}"
@@ -254,9 +254,9 @@ def _run_single(
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
     criterion = nn.CrossEntropyLoss()
 
-    wandb.init(
+    logger = get_logger(
+        run_name=run_name,
         project=cfg.project,
-        name=run_name,
         config={
             **asdict(cfg),
             "augment_dim": augment_dim,
@@ -268,7 +268,6 @@ def _run_single(
             "full_val_samples": len(full_val_loader.dataset),
             "slice_val_samples": len(slice_val_loader.dataset),
         },
-        reinit="finish_previous",
     )
 
     final_train_metrics: Dict[str, float] = {}
@@ -287,7 +286,7 @@ def _run_single(
         final_full_val_metrics = full_val_metrics
         final_slice_val_metrics = slice_val_metrics
 
-        wandb.log(
+        logger.log(
             {
                 "epoch": epoch,
                 "epoch_time_s": final_epoch_time,
@@ -315,7 +314,7 @@ def _run_single(
                 f"time: {final_epoch_time:.2f}s"
             )
 
-    wandb.finish()
+    logger.finish()
 
     return {
         "model_name": model_name,

@@ -4,7 +4,6 @@ import time
 import matplotlib.pyplot as plt
 from models.networks import ODENet
 from data.dataloaders import get_mnist_dataloaders
-import wandb
 import os
 
 
@@ -90,10 +89,4 @@ def plot_figure_3(results, epoch):
     plt.tight_layout()
     os.makedirs("plots", exist_ok=True)
     plt.savefig(f"plots/fig3_epoch_{epoch}.png")
-
-    if wandb.run is not None:
-        wandb.log(
-            {"Figure_3": wandb.Image(f"plots/fig3_epoch_{epoch}.png")}, commit=False
-        )
-
     plt.close()
